@@ -1,4 +1,4 @@
-<?php 
+<?php
 session_start();
 
 // Require composer autoloader
@@ -9,16 +9,19 @@ use Smalot\PdfParser\Parser;
 // Import PHPOffice/PhpWord
 use PhpOffice\PhpWord\IOFactory;
 
-class FileParser {
+class FileParser
+{
     private $filename;
-    
-    public function __construct($filename) {
+
+    public function __construct($filename)
+    {
         $this->filename = $filename;
     }
-    
-    public function parseFile() {
+
+    public function parseFile()
+    {
         $extension = strtolower(pathinfo($this->filename, PATHINFO_EXTENSION));
-        
+
         switch ($extension) {
             case 'pdf':
                 return $this->read_pdf();
@@ -30,8 +33,9 @@ class FileParser {
                 return false;
         }
     }
-    
-    private function read_pdf() {
+
+    private function read_pdf()
+    {
         try {
             $parser = new Parser();
             $pdf = $parser->parseFile($this->filename);
@@ -40,19 +44,20 @@ class FileParser {
             return "Error extracting PDF content: " . $e->getMessage();
         }
     }
-    
-    private function read_doc() {
+
+    private function read_doc()
+    {
         $fileHandle = fopen($this->filename, "r");
         if (!$fileHandle) {
             return "Error: Unable to open DOC file for reading.";
         }
-        
-        $line = @fread($fileHandle, filesize($this->filename));   
+
+        $line = @fread($fileHandle, filesize($this->filename));
         fclose($fileHandle);
-        
+
         $lines = explode(chr(0x0D), $line);
         $outtext = "";
-        foreach($lines as $thisline) {
+        foreach ($lines as $thisline) {
             $pos = strpos($thisline, chr(0x00));
             if (($pos !== FALSE) || (strlen($thisline) == 0)) {
                 // Do nothing
@@ -63,21 +68,22 @@ class FileParser {
         $outtext = preg_replace("/[^a-zA-Z0-9\s\,\.\-\n\r\t@\/\_\(\)]/", "", $outtext);
         return $outtext;
     }
-    
-    private function read_docx() {
+
+    private function read_docx()
+    {
         try {
             // Load the document
             $phpWord = IOFactory::load($this->filename);
-            
+
             // Get all sections
             $text = '';
             $sections = $phpWord->getSections();
-            
+
             // Loop through sections
             foreach ($sections as $section) {
                 // Get all elements in the section
                 $elements = $section->getElements();
-                
+
                 // Loop through elements
                 foreach ($elements as $element) {
                     // If it's a text run
@@ -94,39 +100,41 @@ class FileParser {
                     }
                 }
             }
-            
+
             return $text;
         } catch (Exception $e) {
             return "Error extracting DOCX content: " . $e->getMessage();
         }
     }
-    
+
     // Helper method to extract text from TextRun elements
-    private function extractTextRunContent($textRun) {
+    private function extractTextRunContent($textRun)
+    {
         $text = '';
         $elements = $textRun->getElements();
-        
+
         foreach ($elements as $element) {
             if ($element instanceof \PhpOffice\PhpWord\Element\Text) {
                 $text .= $element->getText();
             }
         }
-        
+
         return $text . "\r\n";
     }
-    
+
     // Helper method to extract text from Table elements
-    private function extractTableContent($table) {
+    private function extractTableContent($table)
+    {
         $text = '';
         $rows = $table->getRows();
-        
+
         foreach ($rows as $row) {
             $cells = $row->getCells();
             $rowText = '';
-            
+
             foreach ($cells as $cell) {
                 $elements = $cell->getElements();
-                
+
                 foreach ($elements as $element) {
                     if ($element instanceof \PhpOffice\PhpWord\Element\TextRun) {
                         $rowText .= $this->extractTextRunContent($element) . " ";
@@ -135,33 +143,15 @@ class FileParser {
                     }
                 }
             }
-            
+
             $text .= $rowText . "\r\n";
         }
-        
+
         return $text;
     }
 }
 
-class Database {
-    private $host = 'localhost';
-    private $username = 'root';
-    private $password = '';
-    private $database = 'academaidb';
-    protected $connection;
-
-    public function connect() {
-        try {
-            $this->connection = new PDO("mysql:host=$this->host;dbname=$this->database", 
-                                        $this->username, $this->password);
-            $this->connection->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
-        } catch (PDOException $e) {
-            error_log("Database connection failed: " . $e->getMessage(), 3, 'errors.log');
-            die("A database connection error occurred. Please try again later.");
-        }
-        return $this->connection;
-    }
-}
+include_once("../classes/connection.php");
 
 // ✅ Initialize database connection
 $db = new Database();
@@ -223,33 +213,33 @@ try {
             if (!empty($_FILES['input2']['name'][$index])) {
                 $file_tmp = $_FILES['input2']['tmp_name'][$index];
                 $original_filename = $_FILES['input2']['name'][$index];
-                
+
                 // Generate a unique filename to prevent overwrites
                 $file_extension = strtolower(pathinfo($original_filename, PATHINFO_EXTENSION));
                 $unique_filename = uniqid('file_') . '_' . $quiz_taker_id . '_' . $question_id . '.' . $file_extension;
                 $file_path = $upload_dir . '/' . $unique_filename;
-                
+
                 // Save original filename for reference
                 $file_name = $original_filename;
-                
+
                 if (is_uploaded_file($file_tmp)) {
                     if (move_uploaded_file($file_tmp, $file_path)) {
                         echo "✅ Debug: File uploaded successfully to: $file_path<br>";
-                        
+
                         // Extract text from file if it's a supported type (pdf, doc, docx)
                         $supported_extensions = ['pdf', 'doc', 'docx'];
                         if (in_array($file_extension, $supported_extensions)) {
                             try {
                                 // Create file parser
                                 $fileParser = new FileParser($file_path);
-                                
+
                                 // Extract text from file
                                 $extracted_text = $fileParser->parseFile();
-                                
+
                                 if ($extracted_text !== false) {
                                     // Debug: Show extracted text length
                                     echo "✅ Debug: Extracted " . strlen($extracted_text) . " characters from " . strtoupper($file_extension) . " file<br>";
-                                    
+
                                     // Append extracted text to answer_text
                                     if ($answer_text) {
                                         $answer_text .= "\n\n----- EXTRACTED " . strtoupper($file_extension) . " TEXT -----\n\n" . $extracted_text;
@@ -287,19 +277,19 @@ try {
     }
 
     // ✅ Step 3: Update quiz_participation status to 'completed'
- 
+
 
     echo "<script>alert('Answers submitted successfully!'); </script>";
     //window.location.href = '../user/AcademAI-Animation-Checking.php';
-    if(isset($_GET["quiz_id"])&& !empty($_POST)){
+    if (isset($_GET["quiz_id"]) && !empty($_POST)) {
         $updateStatus = $pdo->prepare("UPDATE quiz_participation SET status = 'completed' WHERE quiz_taker_id = ?");
         $updateStatus->execute([$quiz_taker_id]);
-    
+
         $pdo->commit();
         $quiz_id = $_GET["quiz_id"];
         header("Location:grade.php?quiz_id=$quiz_id");
     }
-   
+
 } catch (PDOException $e) {
     $pdo->rollBack();
     die("Error - " . $e->getMessage());

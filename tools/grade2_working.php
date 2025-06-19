@@ -149,6 +149,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET') {
             echo "<h3>Database Error</h3><pre>" . $e->getMessage() . "</pre>";
         }
 
+        // Redirect after processing all results
+        // if ($redirectQuizId) {
+        //     header("Location: ../user/AcademAI-user(learners)-view-quiz-answer-1.php?quiz_id=$redirectQuizId");
+        //     exit;
+        // }
         $_SESSION['show_success_alert'] = true;
 
         header("Location: ../user/AcademAI-user(learners)-view-quiz-answer-1.php?quiz_id=$redirectQuizId");

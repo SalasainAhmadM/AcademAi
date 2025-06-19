@@ -1,16 +1,18 @@
-
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <link rel="stylesheet" href="../css/academAI-view- creation-quiz.css">
-
-    <title></title>
+    <link rel="icon" href="../img/light-logo-img.png" type="image/icon type">
+    <title>Academai | Create Quiz</title>
 </head>
+
 <body>
-    
+
 </body>
+
 </html>
 <?php
 
@@ -22,25 +24,7 @@ ini_set('display_errors', 1);
 ini_set('display_startup_errors', 1);
 error_reporting(E_ALL);
 
-class Database {
-    private $host = 'localhost';
-    private $username = 'root';
-    private $password = '';
-    private $database = 'academaidb';
-    protected $connection;
-
-    public function connect() {
-        try {
-            $this->connection = new PDO("mysql:host=$this->host;dbname=$this->database", 
-                                        $this->username, $this->password);
-            $this->connection->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
-        } catch (PDOException $e) {
-            error_log("Database connection failed: " . $e->getMessage(), 3, 'errors.log');
-            die("A database connection error occurred. Please try again later.");
-        }
-        return $this->connection;
-    }
-}
+include_once("../classes/connection.php");
 
 // Create database instance and establish connection
 $db = new Database();
@@ -57,7 +41,7 @@ if (isset($_POST['submit-quiz-creation'])) {
     $endDate = $_POST['endDate'];
     $startTime = $_POST['startTime'];
     $endTime = $_POST['endTime'];
-     
+
 
     // Check if the restriction checkbox is checked
     $isActive = isset($_POST['restriction']) ? 1 : 0;
@@ -81,33 +65,33 @@ if (isset($_POST['submit-quiz-creation'])) {
     // Generate a unique quiz code
     $quizCode = generateQuizCode();
 
-$sql = "INSERT INTO quizzes (title, subject, description, start_date, end_date, start_time, end_time, creation_id, quiz_total_points_essay, is_active, quiz_code, allow_file_submission)
+    $sql = "INSERT INTO quizzes (title, subject, description, start_date, end_date, start_time, end_time, creation_id, quiz_total_points_essay, is_active, quiz_code, allow_file_submission)
         VALUES (:title, :subject, :description, :start_date, :end_date, :start_time, :end_time, :creation_id, :quiz_total_points_essay, :is_active, :quiz_code, :allow_file_submission)";
 
     // Prepare and bind parameters
     $stmt = $conn->prepare($sql);
-$stmt->bindParam(':title', $title);
-$stmt->bindParam(':subject', $subject);
-$stmt->bindParam(':description', $description);
-$stmt->bindParam(':start_date', $startDate);
-$stmt->bindParam(':end_date', $endDate);
-$stmt->bindParam(':start_time', $startTime);
-$stmt->bindParam(':end_time', $endTime);
-$stmt->bindParam(':creation_id', $creationId);
-$stmt->bindParam(':quiz_total_points_essay', $quiz_total_points_essay);
-$stmt->bindParam(':is_active', $isActive);
-$stmt->bindParam(':quiz_code', $quizCode);
-$stmt->bindParam(':allow_file_submission', $allowFileSubmission, PDO::PARAM_INT); // Add this line
+    $stmt->bindParam(':title', $title);
+    $stmt->bindParam(':subject', $subject);
+    $stmt->bindParam(':description', $description);
+    $stmt->bindParam(':start_date', $startDate);
+    $stmt->bindParam(':end_date', $endDate);
+    $stmt->bindParam(':start_time', $startTime);
+    $stmt->bindParam(':end_time', $endTime);
+    $stmt->bindParam(':creation_id', $creationId);
+    $stmt->bindParam(':quiz_total_points_essay', $quiz_total_points_essay);
+    $stmt->bindParam(':is_active', $isActive);
+    $stmt->bindParam(':quiz_code', $quizCode);
+    $stmt->bindParam(':allow_file_submission', $allowFileSubmission, PDO::PARAM_INT); // Add this line
 
 
 
     if ($stmt->execute()) {
         // Get the last inserted quiz_id
         $quizId = $conn->lastInsertId();
-    
+
         try {
             insertEssayQuestions($conn, $quizId);
-    
+
             // Generate the modal content
             echo "
             <div class='modal modal-successful fade' id='successful-message-modal' data-bs-backdrop='static' data-bs-keyboard='false' tabindex='-1' aria-labelledby='staticBackdropLabel' aria-hidden='true'>
@@ -236,7 +220,7 @@ $stmt->bindParam(':allow_file_submission', $allowFileSubmission, PDO::PARAM_INT)
             ";
             // Ensure the script terminates here after modal display
             exit;
-        
+
         } catch (Exception $e) {
             // Handle errors during essay question insertion
             echo "<script>alert('Error: {$e->getMessage()}');</script>";
@@ -244,9 +228,10 @@ $stmt->bindParam(':allow_file_submission', $allowFileSubmission, PDO::PARAM_INT)
         }
     }
 }
-        
 
-function generateQuizCode() {
+
+function generateQuizCode()
+{
     // Generate a random 6-character string
     $characters = '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ'; // Characters to use for the code
     $code = ''; // Initialize the code variable
@@ -357,7 +342,7 @@ function insertEssayQuestions($conn, $quizId)
 
             try {
                 $stmt_essay->execute();
-          
+
             } catch (PDOException $e) {
                 $alertMessages[] = "Error inserting essay question: " . $e->getMessage();
                 echo "Error: " . $e->getMessage(); // Debugging statement

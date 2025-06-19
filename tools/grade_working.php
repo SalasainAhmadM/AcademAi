@@ -1,12 +1,10 @@
 <?php
-
-set_time_limit(300);
 $kiss = "";
 function detectAIContent($essay, $apiUrl = 'https://olraceirdna.pythonanywhere.com/analyze')
 {
   // Validate input
-  if (empty($essay) || str_word_count($essay) < 20) {
-    return ['error' => 'Essay too short for accurate analysis (minimum 20 words)'];
+  if (empty($essay) || strlen($essay) < 50) {
+    return ['error' => 'Essay too short for accurate analysis (minimum 50 characters)'];
   }
 
   // Prepare the API request data

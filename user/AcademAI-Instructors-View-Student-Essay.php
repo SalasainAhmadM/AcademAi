@@ -5,21 +5,11 @@ if (!isset($_SESSION['logged_in'])) {
     exit();
 }
 
-// Database Connection
-$host = 'localhost';
-$dbname = 'academaidb';
-$username = 'root';
-$password = '';
-
-try {
-    $pdo = new PDO("mysql:host=$host;dbname=$dbname;charset=utf8", $username, $password);
-    $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
-} catch (PDOException $e) {
-    die("Database connection failed: " . $e->getMessage());
-}
+include_once("../classes/connection.php");
 
 // Get current user info from session
-if (!isset($_SESSION['creation_id'])) die("User data missing.");
+if (!isset($_SESSION['creation_id']))
+    die("User data missing.");
 $current_user_id = $_SESSION['creation_id'];
 
 // Get user profile data with email
@@ -43,7 +33,8 @@ $quiz_id = isset($_GET['quiz_id']) ? $_GET['quiz_id'] : null;
 if (!$quiz_id) {
     $stmt = $pdo->query("SELECT quiz_id FROM quizzes ORDER BY quiz_id DESC LIMIT 1");
     $quiz_id = $stmt->fetchColumn();
-    if (!$quiz_id) die("No quizzes found.");
+    if (!$quiz_id)
+        die("No quizzes found.");
 }
 
 // Fetch quiz details and creator info
@@ -53,7 +44,8 @@ $stmt = $pdo->prepare("SELECT q.*, a.first_name, a.middle_name, a.last_name
                       WHERE q.quiz_id = ?");
 $stmt->execute([$quiz_id]);
 $quiz = $stmt->fetch(PDO::FETCH_ASSOC);
-if (!$quiz) die("Quiz not found.");
+if (!$quiz)
+    die("Quiz not found.");
 
 $creator_name = trim($quiz['first_name'] . ' ' . $quiz['middle_name'] . ' ' . $quiz['last_name']);
 
@@ -64,15 +56,18 @@ $creator_name = trim($quiz['first_name'] . ' ' . $quiz['middle_name'] . ' ' . $q
 $student_id = isset($_GET['student_id']) ? $_GET['student_id'] : null;
 $quiz_taker_id = isset($_GET['quiz_taker_id']) ? $_GET['quiz_taker_id'] : null;
 
-if (!$student_id) die("Student ID not specified.");
-if (!$quiz_taker_id) die("Quiz taker ID not specified.");
+if (!$student_id)
+    die("Student ID not specified.");
+if (!$quiz_taker_id)
+    die("Quiz taker ID not specified.");
 
 // Get quiz ID from URL or latest quiz
 $quiz_id = isset($_GET['quiz_id']) ? $_GET['quiz_id'] : null;
 if (!$quiz_id) {
     $stmt = $pdo->query("SELECT quiz_id FROM quizzes ORDER BY quiz_id DESC LIMIT 1");
     $quiz_id = $stmt->fetchColumn();
-    if (!$quiz_id) die("No quizzes found.");
+    if (!$quiz_id)
+        die("No quizzes found.");
 }
 
 // Verify the quiz taker ID belongs to the specified student
@@ -80,7 +75,8 @@ $stmt = $pdo->prepare("SELECT quiz_taker_id FROM quiz_participation WHERE user_i
 $stmt->execute([$student_id, $quiz_id, $quiz_taker_id]);
 $quiz_taker = $stmt->fetch(PDO::FETCH_ASSOC);
 
-if (!$quiz_taker) die("Quiz participation not found for this student.");
+if (!$quiz_taker)
+    die("Quiz participation not found for this student.");
 
 
 // Get student's name from academai table
@@ -98,7 +94,8 @@ if ($student) {
 $stmt = $pdo->prepare("SELECT * FROM essay_questions WHERE quiz_id = ?");
 $stmt->execute([$quiz_id]);
 $questions = $stmt->fetchAll(PDO::FETCH_ASSOC);
-if (!$questions) die("No questions available.");
+if (!$questions)
+    die("No questions available.");
 
 // Process answers and evaluations
 $totalPoints = 0;
@@ -106,41 +103,44 @@ $questionData = [];
 
 foreach ($questions as $index => $question) {
     $question_id = $question['essay_id'];
-    
+
     // Get answer
     $stmt = $pdo->prepare("SELECT * FROM quiz_answers WHERE question_id = ? AND quiz_taker_id = ?");
     $stmt->execute([$question_id, $quiz_taker_id]);
     $answer = $stmt->fetch(PDO::FETCH_ASSOC);
-    
+
     $questionData[$index] = [
         'question' => $question,
         'answer' => $answer,
         'evaluation' => null,
         'rubric_link' => null
     ];
-    
+
     if ($answer) {
         // Get evaluation
         $stmt = $pdo->prepare("SELECT * FROM essay_evaluations WHERE answer_id = ? ORDER BY evaluation_date DESC LIMIT 1");
         $stmt->execute([$answer['answer_id']]);
         $evaluation = $stmt->fetch(PDO::FETCH_ASSOC);
-        
+
         if ($evaluation) {
-            $evalData = json_decode(str_replace(["```json\n", "\n```"], "", 
-                             json_decode($evaluation['evaluation_data'], true)["evaluation"]["evaluation"]), true);
-            
+            $evalData = json_decode(str_replace(
+                ["```json\n", "\n```"],
+                "",
+                json_decode($evaluation['evaluation_data'], true)["evaluation"]["evaluation"]
+            ), true);
+
             $points_per_item = $question['points_per_item'];
             $score = $evalData["overall_weighted_score"];
             $earnedPoints = ($score / 100) * $points_per_item;
             $totalPoints += $earnedPoints;
-            
+
             $questionData[$index]['evaluation'] = [
                 'data' => $evalData,
                 'score' => $score,
                 'earnedPoints' => $earnedPoints,
                 'points_possible' => $points_per_item
             ];
-            
+
             // Create assessment link with all required parameters
             $questionData[$index]['rubric_link'] = "AcademAI-Assessment-Instructor.php?quiz_id=$quiz_id&answer_id={$answer['answer_id']}&rubric_id={$question['rubric_id']}&student_id=$student_id&quiz_taker_id=$quiz_taker_id";
         }
@@ -151,14 +151,15 @@ foreach ($questions as $index => $question) {
 
 <!DOCTYPE html>
 <html lang="en" data-theme="light">
+
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Quiz Answers | AcademAI</title>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
-   
-   <style>
+
+    <style>
         :root {
             --primary: #092635;
             --primary-dark: #1B4242;
@@ -203,17 +204,17 @@ foreach ($questions as $index => $question) {
             color: var(--text);
             line-height: 1.6;
             transition: var(--transition);
-           
+
             min-height: 100vh;
         }
 
         .container {
-          
+
             margin: 0 auto;
             padding: 30px;
         }
 
-       
+
         /* Profile */
 
         .header {
@@ -239,10 +240,12 @@ foreach ($questions as $index => $question) {
             gap: 12px;
             padding: 8px 16px;
         }
+
         .user-info {
             display: flex;
             flex-direction: column;
-            max-width: 800px; /* or whatever fits your layout */
+            max-width: 800px;
+            /* or whatever fits your layout */
             word-wrap: break-word;
             overflow-wrap: break-word;
         }
@@ -250,11 +253,12 @@ foreach ($questions as $index => $question) {
         .user-name {
             font-size: 1em;
             font-weight: 700;
-        
+
         }
+
         .user-email {
             font-style: italic;
-            font-size:0.875em;
+            font-size: 0.875em;
         }
 
 
@@ -264,7 +268,7 @@ foreach ($questions as $index => $question) {
             overflow-wrap: break-word;
             word-break: break-word;
         }
-        
+
 
 
         .profile-pic {
@@ -276,22 +280,23 @@ foreach ($questions as $index => $question) {
         }
 
         .back-btn {
-        display: inline-flex;
-        align-items: center;
-        gap: 5px;
-        text-decoration: none;
-        color: #ffffff;
-        font-weight: 500;
-        font-size:2em;
-        transition: color 0.3s ease, transform 0.3s ease;
-    }
-    
-    .back-btn:hover {
-        color: #ffffff;
-        transform: translateX(-5px); /* move slightly to the left */
-    }
-        
-        
+            display: inline-flex;
+            align-items: center;
+            gap: 5px;
+            text-decoration: none;
+            color: #ffffff;
+            font-weight: 500;
+            font-size: 2em;
+            transition: color 0.3s ease, transform 0.3s ease;
+        }
+
+        .back-btn:hover {
+            color: #ffffff;
+            transform: translateX(-5px);
+            /* move slightly to the left */
+        }
+
+
 
         /* Profile */
 
@@ -344,7 +349,8 @@ foreach ($questions as $index => $question) {
             margin-bottom: 30px;
             overflow-x: auto;
             border-bottom: 1px solid rgb(196, 196, 196);
-            align-items: center; /* Add this to vertically center all items */
+            align-items: center;
+            /* Add this to vertically center all items */
         }
 
         .tab-btn {
@@ -360,7 +366,7 @@ foreach ($questions as $index => $question) {
             white-space: nowrap;
             transition: var(--transition);
             color: #092635;
-            font-size:1.2em;
+            font-size: 1.2em;
 
         }
 
@@ -371,7 +377,7 @@ foreach ($questions as $index => $question) {
         .tab-btn.active {
             background: var(--primary);
             color: white;
-          
+
         }
 
         .tab-btn:hover:not(.active) {
@@ -382,11 +388,11 @@ foreach ($questions as $index => $question) {
         /* Tab Content */
         .tab-content {
             display: none;
-            padding:0px 20px;
+            padding: 0px 20px;
             margin-bottom: 30px;
             transition: var(--transition);
             border: none;
-           
+
         }
 
         .tab-content.active {
@@ -395,15 +401,23 @@ foreach ($questions as $index => $question) {
         }
 
         @keyframes fadeIn {
-            from { opacity: 0; transform: translateY(10px); }
-            to { opacity: 1; transform: translateY(0); }
+            from {
+                opacity: 0;
+                transform: translateY(10px);
+            }
+
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
         }
 
 
 
         /* Add this new style for the total score in tabs */
         .tabs-total-score {
-            margin-left: auto; /* Pushes it to the right */
+            margin-left: auto;
+            /* Pushes it to the right */
             padding: 8px 16px;
             color: #092635;
             border-radius: 20px;
@@ -435,15 +449,16 @@ foreach ($questions as $index => $question) {
             padding: 20px;
             box-shadow: var(--shadow);
             transition: var(--transition);
-        
+
             position: relative;
             overflow: hidden;
-           
+
         }
 
         .info-card:hover {
             transform: translateY(-5px);
-            box-shadow: 0 6px 16px rgba(0, 0, 0, 0.15); /* soft shadow that's not too harsh */
+            box-shadow: 0 6px 16px rgba(0, 0, 0, 0.15);
+            /* soft shadow that's not too harsh */
         }
 
         .info-card h4 {
@@ -480,7 +495,7 @@ foreach ($questions as $index => $question) {
             position: relative;
         }
 
-   
+
 
         .question-card.active {
             display: block;
@@ -488,8 +503,15 @@ foreach ($questions as $index => $question) {
         }
 
         @keyframes slideIn {
-            from { opacity: 0; transform: translateX(20px); }
-            to { opacity: 1; transform: translateX(0); }
+            from {
+                opacity: 0;
+                transform: translateX(20px);
+            }
+
+            to {
+                opacity: 1;
+                transform: translateX(0);
+            }
         }
 
         .question-header {
@@ -537,23 +559,23 @@ foreach ($questions as $index => $question) {
         }
 
         .answer-section {
-         
+
             padding: 20px;
             border-radius: 5px;
             margin-bottom: 28px;
-        
+
             position: relative;
             border: 1px solid var(--border);
-          
+
 
         }
 
         .rubric-selection-btn {
-            display:flex;
-            justify-content:center;
+            display: flex;
+            justify-content: center;
         }
 
- 
+
         .answer-section h5 {
             color: var(--primary);
             margin-bottom: 12px;
@@ -576,16 +598,17 @@ foreach ($questions as $index => $question) {
 
         /* Rubrics Section */
         .rubrics-section {
-            
+
             padding: 20px;
             border-radius: 5px;
             margin-bottom: 28px;
             border: 1px solid var(--border);
             position: relative;
-            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1); /* Light, soft shadow */
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+            /* Light, soft shadow */
         }
 
-      
+
 
         .rubrics-header {
             display: flex;
@@ -643,14 +666,15 @@ foreach ($questions as $index => $question) {
             box-shadow: var(--shadow);
             margin-top: 20px;
             border: 2px solid transparent;
-            width:100%;
-            justify-content:center;
+            width: 100%;
+            justify-content: center;
         }
 
         .assessment-btn:hover {
-            background-color: #5C8374;;
+            background-color: #5C8374;
+            ;
             color: white;
-          
+
             transform: translateY(-2px);
         }
 
@@ -692,19 +716,22 @@ foreach ($questions as $index => $question) {
 
         /* Total Points */
         .total-points-card {
-        color: #092635;
-        margin-top: 40px;
-        text-align: center;
-        box-shadow: var(--shadow);
-        position: relative;
-        overflow: hidden;
-        padding: 10px;
-        transition: transform 0.3s ease; /* Smooth movement */
+            color: #092635;
+            margin-top: 40px;
+            text-align: center;
+            box-shadow: var(--shadow);
+            position: relative;
+            overflow: hidden;
+            padding: 10px;
+            transition: transform 0.3s ease;
+            /* Smooth movement */
         }
 
         .total-points-card:hover {
-            transform: translateY(-5px); /* Moves the card up by 5px */
-            box-shadow: 0 6px 16px rgba(0, 0, 0, 0.15); /* soft shadow that's not too harsh */
+            transform: translateY(-5px);
+            /* Moves the card up by 5px */
+            box-shadow: 0 6px 16px rgba(0, 0, 0, 0.15);
+            /* soft shadow that's not too harsh */
         }
 
 
@@ -730,7 +757,7 @@ foreach ($questions as $index => $question) {
             color: var(--primary);
             font-size: 1rem;
             font-weight: 600;
-         
+
             padding: 10px;
             border-radius: 50px;
             display: inline-block;
@@ -801,52 +828,54 @@ foreach ($questions as $index => $question) {
                 flex-direction: column;
                 text-align: center;
             }
-            
+
             .total-score-display {
                 font-size: 2rem;
             }
         }
     </style>
 </head>
+
 <body>
 
 
-     <!-- Header with Back Buttonand User Profile -->
-     <div class="header">
-        <a href="../user/AcademAI-Library-Leaderboard.php?quiz_id=<?php echo htmlspecialchars($quiz_id); ?>&student_id=<?php echo htmlspecialchars($student_id); ?>" class="back-btn">
+    <!-- Header with Back Buttonand User Profile -->
+    <div class="header">
+        <a href="../user/AcademAI-Library-Leaderboard.php?quiz_id=<?php echo htmlspecialchars($quiz_id); ?>&student_id=<?php echo htmlspecialchars($student_id); ?>"
+            class="back-btn">
             <i class="fa-solid fa-chevron-left"></i>
-            </a>   
-            <div class="header-right">  
-                <div class="user-profile">
-                    <img src="<?php echo htmlspecialchars($photo_path); ?>" alt="Profile Picture" class="profile-pic">
-                    <div class="user-info">
+        </a>
+        <div class="header-right">
+            <div class="user-profile">
+                <img src="<?php echo htmlspecialchars($photo_path); ?>" alt="Profile Picture" class="profile-pic">
+                <div class="user-info">
                     <span class="user-name"><?php echo htmlspecialchars($full_name); ?></span>
                     <span class="user-email"><?php echo htmlspecialchars($email); ?></span>
-                      
-                    </div>
+
                 </div>
             </div>
         </div>
-     <!-- Header with Back Buttonand User Profile -->
+    </div>
+    <!-- Header with Back Buttonand User Profile -->
 
 
 
 
     <div class="container">
-       
-        
+
+
         <!-- Quiz Creator Info -->
         <div class="creator-info">
             <div class="creator-icon">
                 <i class="fas fa-chalkboard-teacher"></i>
             </div>
             <div class="creator-text">
-            <div class="creator-text">
-    Quiz Taker : <strong><?php echo htmlspecialchars($student_name); ?></strong>
-</div>
+                <div class="creator-text">
+                    Quiz Taker : <strong><?php echo htmlspecialchars($student_name); ?></strong>
+                </div>
             </div>
         </div>
-        
+
         <!-- Navigation Tabs -->
         <div class="nav-tabs">
             <button class="tab-btn active" onclick="showTab('quiz-info')">
@@ -859,98 +888,99 @@ foreach ($questions as $index => $question) {
                 <i class="fas fa-paper-plane"></i> Submission
             </button>
             <div class="tabs-total-score"> Quiz Total Score:
-       
-        <?php echo number_format($totalPoints, 2); ?> / <?php echo htmlspecialchars($quiz['quiz_total_points_essay']); ?> pts
+
+                <?php echo number_format($totalPoints, 2); ?> /
+                <?php echo htmlspecialchars($quiz['quiz_total_points_essay']); ?> pts
+            </div>
+        </div>
+
     </div>
-</div>
 
-        </div>
-        
-        <!-- Quiz Info Tab -->
-        <div id="quiz-info" class="tab-content active">
-            <div class="info-grid">
-                <div class="info-card">
-                    <h4><i class="fas fa-heading"></i> Quiz Title</h4>
-                    <p><?php echo htmlspecialchars($quiz['title']); ?></p>
-                </div>
-                
-                <div class="info-card">
-                    <h4><i class="fas fa-book"></i> Subject</h4>
-                    <p><?php echo htmlspecialchars($quiz['subject']); ?></p>
-                </div>
-                
-                <div class="info-card">
-                    <h4><i class="fas fa-align-left"></i> Description</h4>
-                    <p><?php echo htmlspecialchars($quiz['description']); ?></p>
-                </div>
-                
-                <div class="info-card">
-    <h4><i class="fas fa-cog"></i> Quiz Settings</h4>
-    <p>
-        <?php if ($quiz['is_active']): ?>
-            <strong>Restricted:</strong> This quiz will automatically close once the deadline is reached.
-        <?php else: ?>
-            <strong>Unrestricted:</strong> This quiz will remain open even after the deadline.
-        <?php endif; ?>
-    </p>
-</div>
+    <!-- Quiz Info Tab -->
+    <div id="quiz-info" class="tab-content active">
+        <div class="info-grid">
+            <div class="info-card">
+                <h4><i class="fas fa-heading"></i> Quiz Title</h4>
+                <p><?php echo htmlspecialchars($quiz['title']); ?></p>
+            </div>
+
+            <div class="info-card">
+                <h4><i class="fas fa-book"></i> Subject</h4>
+                <p><?php echo htmlspecialchars($quiz['subject']); ?></p>
+            </div>
+
+            <div class="info-card">
+                <h4><i class="fas fa-align-left"></i> Description</h4>
+                <p><?php echo htmlspecialchars($quiz['description']); ?></p>
+            </div>
+
+            <div class="info-card">
+                <h4><i class="fas fa-cog"></i> Quiz Settings</h4>
+                <p>
+                    <?php if ($quiz['is_active']): ?>
+                        <strong>Restricted:</strong> This quiz will automatically close once the deadline is reached.
+                    <?php else: ?>
+                        <strong>Unrestricted:</strong> This quiz will remain open even after the deadline.
+                    <?php endif; ?>
+                </p>
+            </div>
 
 
+        </div>
+    </div>
+
+    <!-- Date Info Tab -->
+    <div id="date-info" class="tab-content">
+        <div class="info-grid">
+            <div class="info-card">
+                <h4><i class="fas fa-calendar-check"></i> Start Date</h4>
+                <p><?php echo date('F j, Y', strtotime($quiz['start_date'])); ?></p>
+            </div>
+
+            <div class="info-card">
+                <h4><i class="fas fa-calendar-times"></i> End Date</h4>
+                <p><?php echo date('F j, Y', strtotime($quiz['end_date'])); ?></p>
+            </div>
+
+            <div class="info-card">
+                <h4><i class="fas fa-clock"></i> Start Time</h4>
+                <p><?php echo date('g:i A', strtotime($quiz['start_time'])); ?></p>
+            </div>
+
+            <div class="info-card">
+                <h4><i class="fas fa-clock"></i> End Time</h4>
+                <p><?php echo date('g:i A', strtotime($quiz['end_time'])); ?></p>
             </div>
         </div>
-        
-        <!-- Date Info Tab -->
-        <div id="date-info" class="tab-content">
-            <div class="info-grid">
-                <div class="info-card">
-                    <h4><i class="fas fa-calendar-check"></i> Start Date</h4>
-                    <p><?php echo date('F j, Y', strtotime($quiz['start_date'])); ?></p>
-                </div>
-                
-                <div class="info-card">
-                    <h4><i class="fas fa-calendar-times"></i> End Date</h4>
-                    <p><?php echo date('F j, Y', strtotime($quiz['end_date'])); ?></p>
-                </div>
-                
-                <div class="info-card">
-                    <h4><i class="fas fa-clock"></i> Start Time</h4>
-                    <p><?php echo date('g:i A', strtotime($quiz['start_time'])); ?></p>
-                </div>
-                
-                <div class="info-card">
-                    <h4><i class="fas fa-clock"></i> End Time</h4>
-                    <p><?php echo date('g:i A', strtotime($quiz['end_time'])); ?></p>
-                </div>
+    </div>
+
+    <!-- Submission Info Tab -->
+    <div id="submission-info" class="tab-content">
+        <div class="info-grid">
+            <div class="info-card">
+                <h4><i class="fas fa-check-circle"></i> Submission Status</h4>
+                <p>Completed</p>
+            </div>
+
+            <div class="info-card">
+                <h4><i class="fas fa-calendar-day"></i> Submission Date</h4>
+                <p><?php echo date('F j, Y'); ?></p>
+            </div>
+
+            <div class="info-card">
+                <h4><i class="fas fa-clock"></i> Submission Time</h4>
+                <p><?php echo date('g:i A'); ?></p>
             </div>
         </div>
-        
-        <!-- Submission Info Tab -->
-        <div id="submission-info" class="tab-content">
-            <div class="info-grid">
-                <div class="info-card">
-                    <h4><i class="fas fa-check-circle"></i> Submission Status</h4>
-                    <p>Completed</p>
-                </div>
-                
-                <div class="info-card">
-                    <h4><i class="fas fa-calendar-day"></i> Submission Date</h4>
-                    <p><?php echo date('F j, Y'); ?></p>
-                </div>
-                
-                <div class="info-card">
-                    <h4><i class="fas fa-clock"></i> Submission Time</h4>
-                    <p><?php echo date('g:i A'); ?></p>
-                </div>
-            </div>
+    </div>
+
+    <!-- Questions Section -->
+    <div class="questions-container">
+        <div class="progress-indicator" id="progressIndicator">
+            Question 1 of <?php echo count($questionData); ?>
         </div>
-        
-        <!-- Questions Section -->
-        <div class="questions-container">
-            <div class="progress-indicator" id="progressIndicator">
-                Question 1 of <?php echo count($questionData); ?>
-            </div>
-            
-            <?php foreach ($questionData as $index => $data): ?>
+
+        <?php foreach ($questionData as $index => $data): ?>
             <div class="question-card <?php echo $index === 0 ? 'active' : ''; ?>" id="question-<?php echo $index + 1; ?>">
                 <div class="question-header">
                     <div class="question-title">
@@ -959,48 +989,49 @@ foreach ($questions as $index => $question) {
                     </div>
                     <div class="question-points">
                         <?php if (isset($data['evaluation'])): ?>
-                            <?php echo number_format($data['evaluation']['earnedPoints'], 2); ?> / <?php echo $data['evaluation']['points_possible']; ?> pts
+                            <?php echo number_format($data['evaluation']['earnedPoints'], 2); ?> /
+                            <?php echo $data['evaluation']['points_possible']; ?> pts
                         <?php else: ?>
                             0 / <?php echo $data['question']['points_per_item']; ?> pts
                         <?php endif; ?>
                     </div>
                 </div>
-                
+
                 <div class="question-text">
                     <?php echo htmlspecialchars($data['question']['question']); ?>
                 </div>
-                
+
                 <div class="answer-section">
                     <h5><i class="fas fa-edit"></i> Your Answer:</h5>
                     <div class="answer-text">
                         <?php echo $data['answer'] ? nl2br(htmlspecialchars($data['answer']['answer_text'])) : 'No answer submitted.'; ?>
                     </div>
                 </div>
-                
+
                 <?php if (isset($data['evaluation'])): ?>
-                <div class="rubrics-section">
-                    <div class="rubrics-header">
-                        <i class="fas fa-chart-bar"></i>
-                        <h4>Evaluation Results</h4>
-                        <span class="total-score"><?php echo $data['evaluation']['score']; ?>%</span>
+                    <div class="rubrics-section">
+                        <div class="rubrics-header">
+                            <i class="fas fa-chart-bar"></i>
+                            <h4>Evaluation Results</h4>
+                            <span class="total-score"><?php echo $data['evaluation']['score']; ?>%</span>
+                        </div>
+
+                        <?php foreach ($data['evaluation']['data']['criteria_scores'] as $criteria => $scoreData): ?>
+                            <div class="rubric-item">
+                                <p><?php echo htmlspecialchars($criteria); ?></p>
+                                <span class="rubric-score"><?php echo $scoreData['score']; ?>%</span>
+                            </div>
+                        <?php endforeach; ?>
+                        <div class="rubric-selection-btn">
+                            <?php if ($data['rubric_link']): ?>
+                                <a href="<?php echo htmlspecialchars($data['rubric_link']); ?>" class="assessment-btn">
+                                    <i class="fas fa-table-list"></i> View Detailed Rubric & Assessment
+                                </a>
+                            </div>
+                        <?php endif; ?>
                     </div>
-                    
-                    <?php foreach ($data['evaluation']['data']['criteria_scores'] as $criteria => $scoreData): ?>
-                    <div class="rubric-item">
-                        <p><?php echo htmlspecialchars($criteria); ?></p>
-                        <span class="rubric-score"><?php echo $scoreData['score']; ?>%</span>
-                    </div>
-                    <?php endforeach; ?>
-                    <div class ="rubric-selection-btn">
-                    <?php if ($data['rubric_link']): ?>
-                    <a href="<?php echo htmlspecialchars($data['rubric_link']); ?>" class="assessment-btn">
-                        <i class="fas fa-table-list"></i> View Detailed Rubric & Assessment
-                    </a>
-                    </div>
-                    <?php endif; ?>
-                </div>
                 <?php endif; ?>
-                
+
                 <div class="question-nav">
                     <button class="nav-btn" onclick="prevQuestion()" <?php echo $index === 0 ? 'disabled' : ''; ?>>
                         <i class="fas fa-chevron-left"></i> Previous Question
@@ -1010,63 +1041,63 @@ foreach ($questions as $index => $question) {
                     </button>
                 </div>
             </div>
-            <?php endforeach; ?>
-        </div>
-        
+        <?php endforeach; ?>
+    </div>
 
-    
-   <script>
+
+
+    <script>
         // Tab Navigation
         function showTab(tabId) {
             // Hide all tab contents
             document.querySelectorAll('.tab-content').forEach(tab => {
                 tab.classList.remove('active');
             });
-            
+
             // Show selected tab content
             document.getElementById(tabId).classList.add('active');
-            
+
             // Update active tab button
             document.querySelectorAll('.tab-btn').forEach(btn => {
                 btn.classList.remove('active');
             });
             event.currentTarget.classList.add('active');
         }
-        
+
         // Question Navigation
         let currentQuestion = 1;
         const totalQuestions = <?php echo count($questionData); ?>;
         const progressIndicator = document.getElementById('progressIndicator');
-        
+
         function showQuestion(questionNum) {
             document.querySelectorAll('.question-card').forEach(card => {
                 card.classList.remove('active');
             });
             document.getElementById(`question-${questionNum}`).classList.add('active');
             currentQuestion = questionNum;
-            
+
             // Update progress indicator
             progressIndicator.textContent = `Question ${questionNum} of ${totalQuestions}`;
-            
+
             // Scroll to top of question
             window.scrollTo({
                 top: document.getElementById(`question-${questionNum}`).offsetTop - 120,
                 behavior: 'smooth'
             });
         }
-        
+
         function nextQuestion() {
             if (currentQuestion < totalQuestions) {
                 showQuestion(currentQuestion + 1);
             }
         }
-        
+
         function prevQuestion() {
             if (currentQuestion > 1) {
                 showQuestion(currentQuestion - 1);
             }
         }
-        
+
         // Keyboard navigation
         document.addEventListener('keydown', (e) => {
             if (e.key === 'ArrowRight') {
@@ -1075,11 +1106,12 @@ foreach ($questions as $index => $question) {
                 prevQuestion();
             }
         });
-        
+
         // Initialize first question
         document.addEventListener('DOMContentLoaded', () => {
             showQuestion(1);
         });
-</script>
+    </script>
 </body>
+
 </html>
