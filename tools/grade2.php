@@ -30,7 +30,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET') {
                 $essayText = $result['essay'];
                 $quiz_id = $result['quiz_id'];
                 $question_id = $result['question_id'];
-
+                $teacherComment = $result['teacher_comment'] ?? null;
                 // Set redirect ID from first result
                 if ($redirectQuizId === null) {
                     $redirectQuizId = $quiz_id;
@@ -106,7 +106,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET') {
                         UPDATE essay_evaluations 
                         SET overall_score = ?, ai_probability = ?, human_probability = ?, 
                             plagiarism_score = ?, plagiarism_sources = ?, 
-                            evaluation_data = ?, evaluation_date = NOW(), quiz_id = ?
+                            evaluation_data = ?, evaluation_date = NOW(), quiz_id = ?, teacher_comment = ?
                         WHERE answer_id = ?
                     ");
                     $success = $updateStmt->execute([
@@ -117,15 +117,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET') {
                         $sourcesJson,
                         $evaluationData,
                         $quiz_id,
+                        $teacherComment,
                         $answer['answer_id']
                     ]);
                 } else {
                     $insertStmt = $conn->prepare("
                         INSERT INTO essay_evaluations 
                         (answer_id, student_id, question_id, quiz_id, overall_score, ai_probability, 
-                         human_probability, plagiarism_score, plagiarism_sources, evaluation_data, 
+                         human_probability, plagiarism_score, plagiarism_sources, evaluation_data,teacher_comment, 
                          evaluation_date) 
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())
                     ");
                     $success = $insertStmt->execute([
                         $answer['answer_id'],
@@ -137,7 +138,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET') {
                         $humanProbability,
                         $plagiarismScore,
                         $sourcesJson,
-                        $evaluationData
+                        $evaluationData,
+                        $teacherComment
                     ]);
                 }
 

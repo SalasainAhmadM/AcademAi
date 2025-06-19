@@ -404,8 +404,140 @@ $question_number = $_GET['question_number'] ?? 'Unknown';
                                             <?php
                                             // Convert line break placeholder to actual <br> tags
                                             $criteriaData["feedback"] = str_replace("**", "<br>", $criteriaData["feedback"]);
-                                            echo $criteriaData["feedback"];
+                                            $feedbackLines = explode("<br>", $criteriaData["feedback"]);
+                                            $allowedLevels = array_map('strtolower', $criteriaDatas['headers'] ?? []); // Normalize headers (e.g., "Good", "Excellent")
+                                    
+                                            foreach ($feedbackLines as $line) {
+                                                $line = trim($line);
+
+                                                // Match levels: "Why Excellent", "Why not Good", etc.
+                                                if (preg_match('/Why (not )?([\w\s]+):/i', $line, $match)) {
+                                                    $level = strtolower(trim($match[2])); // Extract "Excellent", "Good", etc.
+                                    
+                                                    if (in_array($level, $allowedLevels)) {
+                                                        echo "<p>$line</p>";
+                                                    }
+                                                }
+                                            }
                                             ?>
+                                            <?php if (!empty($teacher_comment)): ?>
+                                                <div class="teacher-benchmark"
+                                                    style="margin-top: 15px; border-top: 1px solid #ccc; padding-top: 10px;">
+                                                    <p style="font-weight: bold; color: #1b4242;">📊 Creators Benchmark:</p>
+                                                    <?php
+                                                    $decodedComment = json_decode($teacher_comment, true);
+
+                                                    if ($decodedComment && isset($decodedComment['rubric_analysis']['criterion_scores'])) {
+                                                        // Get the criterion scores from teacher comment
+                                                        $criterionScores = $decodedComment['rubric_analysis']['criterion_scores'];
+
+                                                        // Create a simple counter to match criteria by position
+                                                        static $criteriaCounter = 0;
+                                                        $criterionKey = 'criterion_' . $criteriaCounter;
+
+                                                        // Check if this specific criterion exists in teacher feedback
+                                                        if (isset($criterionScores[$criterionKey])) {
+                                                            $criterion = $criterionScores[$criterionKey];
+                                                            echo "<div style='background-color: #f8f9fa; padding: 15px; border-radius: 8px; margin-top: 10px; border-left: 4px solid #1b4242;'>";
+                                                            // echo "<p><strong>📊 Teacher Score:</strong> " . htmlspecialchars($criterion['score']) . "</p>";
+                                                            echo "<p><strong>💬 Detailed Feedback:</strong> " . htmlspecialchars($criterion['feedback']) . "</p>";
+                                                            echo "</div>";
+                                                        }
+
+                                                        $criteriaCounter++;
+
+                                                    } elseif (isset($decodedComment['grade_justification'])) {
+                                                        // Show overall grade justification
+                                                        echo "<div style='background-color: #f8f9fa; padding: 15px; border-radius: 8px; margin-top: 10px; border-left: 4px solid #1b4242;'>";
+                                                        echo "<p><strong>📝 Grade Justification:</strong> " . htmlspecialchars($decodedComment['grade_justification']) . "</p>";
+                                                        echo "</div>";
+
+                                                    } elseif (isset($decodedComment['overall_assessment'])) {
+                                                        // Show overall assessment
+                                                        echo "<div style='background-color: #f8f9fa; padding: 15px; border-radius: 8px; margin-top: 10px; border-left: 4px solid #1b4242;'>";
+                                                        echo "<p><strong>🎯 Overall Assessment:</strong> " . htmlspecialchars($decodedComment['overall_assessment']) . "</p>";
+                                                        echo "</div>";
+
+                                                    } else {
+                                                        // Plain text fallback
+                                                        echo "<div style='background-color: #f8f9fa; padding: 15px; border-radius: 8px; margin-top: 10px; border-left: 4px solid #1b4242;'>";
+                                                        echo "<p>" . nl2br(htmlspecialchars($teacher_comment)) . "</p>";
+                                                        echo "</div>";
+                                                    }
+
+                                                    // Show additional teacher feedback sections if available
+                                                    if ($decodedComment) {
+                                                        // Constructive Feedback Section
+                                                        if (isset($decodedComment['constructive_feedback'])) {
+                                                            echo "<div style='background-color: #e8f5e8; padding: 15px; border-radius: 8px; margin-top: 15px; border-left: 4px solid #28a745;'>";
+                                                            echo "<p style='font-weight: bold; color: #155724; margin-bottom: 10px;'>🎯 Constructive Feedback:</p>";
+
+                                                            if (isset($decodedComment['constructive_feedback']['specific_improvements']) && is_array($decodedComment['constructive_feedback']['specific_improvements'])) {
+                                                                echo "<p><strong>Specific Improvements:</strong></p>";
+                                                                echo "<ul style='margin-left: 15px;'>";
+                                                                foreach ($decodedComment['constructive_feedback']['specific_improvements'] as $improvement) {
+                                                                    echo "<li>" . htmlspecialchars($improvement) . "</li>";
+                                                                }
+                                                                echo "</ul>";
+                                                            }
+
+                                                            if (isset($decodedComment['constructive_feedback']['study_recommendations']) && is_array($decodedComment['constructive_feedback']['study_recommendations'])) {
+                                                                echo "<p><strong>📚 Study Recommendations:</strong></p>";
+                                                                echo "<ul style='margin-left: 15px;'>";
+                                                                foreach ($decodedComment['constructive_feedback']['study_recommendations'] as $recommendation) {
+                                                                    echo "<li>" . htmlspecialchars($recommendation) . "</li>";
+                                                                }
+                                                                echo "</ul>";
+                                                            }
+
+                                                            if (isset($decodedComment['constructive_feedback']['writing_tips']) && is_array($decodedComment['constructive_feedback']['writing_tips'])) {
+                                                                echo "<p><strong>✍️ Writing Tips:</strong></p>";
+                                                                echo "<ul style='margin-left: 15px;'>";
+                                                                foreach ($decodedComment['constructive_feedback']['writing_tips'] as $tip) {
+                                                                    echo "<li>" . htmlspecialchars($tip) . "</li>";
+                                                                }
+                                                                echo "</ul>";
+                                                            }
+                                                            echo "</div>";
+                                                        }
+
+                                                        // Comparison with Reference Section
+                                                        if (isset($decodedComment['comparison_with_reference'])) {
+                                                            echo "<div style='background-color: #fff3cd; padding: 15px; border-radius: 8px; margin-top: 15px; border-left: 4px solid #ffc107;'>";
+                                                            echo "<p style='font-weight: bold; color: #856404; margin-bottom: 10px;'>📋 Comparison with Reference:</p>";
+
+                                                            if (isset($decodedComment['comparison_with_reference']['missing_elements']) && is_array($decodedComment['comparison_with_reference']['missing_elements'])) {
+                                                                echo "<p><strong>❌ Missing Elements:</strong></p>";
+                                                                echo "<ul style='margin-left: 15px;'>";
+                                                                foreach ($decodedComment['comparison_with_reference']['missing_elements'] as $element) {
+                                                                    echo "<li>" . htmlspecialchars($element) . "</li>";
+                                                                }
+                                                                echo "</ul>";
+                                                            }
+
+                                                            if (isset($decodedComment['comparison_with_reference']['differences']) && is_array($decodedComment['comparison_with_reference']['differences'])) {
+                                                                echo "<p><strong>🔄 Key Differences:</strong></p>";
+                                                                echo "<ul style='margin-left: 15px;'>";
+                                                                foreach ($decodedComment['comparison_with_reference']['differences'] as $difference) {
+                                                                    echo "<li>" . htmlspecialchars($difference) . "</li>";
+                                                                }
+                                                                echo "</ul>";
+                                                            }
+
+                                                            if (isset($decodedComment['comparison_with_reference']['similarities']) && is_array($decodedComment['comparison_with_reference']['similarities']) && !empty($decodedComment['comparison_with_reference']['similarities'])) {
+                                                                echo "<p><strong>✅ Similarities:</strong></p>";
+                                                                echo "<ul style='margin-left: 15px;'>";
+                                                                foreach ($decodedComment['comparison_with_reference']['similarities'] as $similarity) {
+                                                                    echo "<li>" . htmlspecialchars($similarity) . "</li>";
+                                                                }
+                                                                echo "</ul>";
+                                                            }
+                                                            echo "</div>";
+                                                        }
+                                                    }
+                                                    ?>
+                                                </div>
+                                            <?php endif; ?>
                                         </div>
 
                                         <?php if (isset($criteriaData["suggestions"]) && !empty($criteriaData["suggestions"])): ?>
@@ -468,39 +600,48 @@ $question_number = $_GET['question_number'] ?? 'Unknown';
                 <!-- AI Report Section -->
                 <div id="ai-report" class="content-section">
                     <div class="assessment">
-                        <?php if (isset($data["ai_detection"]) && !empty($data["ai_detection"])): ?>
+                        <?php if (isset($parsedEvaluation["ai_detection"]) && !empty($parsedEvaluation["ai_detection"])): ?>
                             <div class="assessment-details-ai">
                                 <p class="rubrics-ai">AI Detection Analysis</p>
                                 <div class="ai-score-container">
                                     <div class="ai-score-chart">
                                         <div class="ai-meter">
-                                            <div class="ai-portion"
-                                                style="width: <?php echo htmlspecialchars($data["ai_detection"]["ai_probability"] * 100); ?>%;">
+                                            <?php
+                                            $ai_percentage = $parsedEvaluation["ai_detection"]["ai_probability"] ?? 0;
+                                            $human_percentage = $parsedEvaluation["ai_detection"]["human_probability"] ?? 0;
+
+                                            // Normalize to 100% bar (ensures total width = 100%)
+                                            $total = $ai_percentage + $human_percentage;
+                                            $ai_width = $total > 0 ? ($ai_percentage / $total) * 100 : 0;
+                                            $human_width = 100 - $ai_width;
+                                            ?>
+
+                                            <div class="ai-portion" style="width: <?php echo $ai_width; ?>%;">
                                                 <span class="ai-label">AI:
-                                                    <?php echo htmlspecialchars($data["ai_detection"]["ai_probability"] * 100); ?>%</span>
+                                                    <?php echo number_format($ai_width, 2); ?>%</span>
                                             </div>
-                                            <div class="human-portion"
-                                                style="width: <?php echo htmlspecialchars($data["ai_detection"]["human_probability"] * 100); ?>%;">
+                                            <div class="human-portion" style="width: <?php echo $human_width; ?>%;">
                                                 <span class="human-label">Human:
-                                                    <?php echo htmlspecialchars($data["ai_detection"]["human_probability"] * 100); ?>%</span>
+                                                    <?php echo number_format($human_width, 2); ?>%</span>
                                             </div>
                                         </div>
 
                                         <div class="ai-explanation">
                                             <br>
                                             <h4>Detailed Explanation:</h4>
-                                            <?php if (isset($data["ai_detection"]["explanation"])): ?>
-                                                <div class="ai-meter">
+                                            <?php if (isset($parsedEvaluation["ai_detection"]["explanation"])): ?>
+                                                <div class="ai-summary" style="white-space: pre-wrap;">
                                                     <?php
-                                                    echo nl2br(htmlspecialchars(
-                                                        preg_replace([
-                                                            '/```json/',       // Remove opening code block
-                                                            '/```/',           // Remove closing code block
-                                                            '/,+/',            // Remove extra commas (1 or more)
-                                                            '/\bJSON\b/',      // Remove the word JSON
-                                                            '/\b[A-Z]{3,}\b/'  // Remove all-caps words (3 or more letters)
-                                                        ], '', $data["ai_detection"]["explanation"])
-                                                    ));
+                                                    // Clean up explanation
+                                                    $cleaned_explanation = preg_replace([
+                                                        '/\*\* ?: ?\*\*/',    // remove ** :** artifacts
+                                                        '/```json/',          // remove ```json
+                                                        '/```/',              // remove ```
+                                                        '/,+/',               // remove trailing commas
+                                                        '/\bJSON\b/',         // remove literal word JSON
+                                                    ], '', $parsedEvaluation["ai_detection"]["explanation"]);
+
+                                                    echo htmlspecialchars(trim($cleaned_explanation));
                                                     ?>
                                                 </div>
                                             <?php else: ?>
@@ -508,33 +649,33 @@ $question_number = $_GET['question_number'] ?? 'Unknown';
                                                     <p>No explanation found.</p>
                                                 </div>
                                             <?php endif; ?>
-
                                         </div>
                                     </div>
                                 </div>
 
                                 <div class="ai-explanation">
-                                    <h4>What does this mean?</h5>
-                                        <p>This analysis estimates the probability that the text was generated by AI versus
-                                            written by a human. A higher AI percentage suggests the content may have been
-                                            created or heavily assisted by AI tools like ChatGPT or similar models.</p>
+                                    <h4>What does this mean?</h4>
+                                    <p>This analysis estimates the probability that the text was generated by AI versus
+                                        written by a human. A higher AI percentage suggests the content may have been
+                                        created or heavily assisted by AI tools like ChatGPT or similar models.</p>
 
-                                        <?php if ($data["ai_detection"]["ai_probability"] > 70): ?>
-                                            <div class="ai-warning">
-                                                <p><strong>Note:</strong> This content shows a high probability of AI
-                                                    generation. If this work was submitted as original human work, please review
-                                                    your institution's policies on AI-assisted writing.</p>
-                                            </div>
-                                        <?php elseif ($data["ai_detection"]["ai_probability"] > 40): ?>
-                                            <div class="ai-caution">
-                                                <p><strong>Note:</strong> This content shows moderate indicators of AI
-                                                    assistance. The writing may contain sections created with AI help.</p>
-                                            </div>
-                                        <?php else: ?>
-                                            <div class="ai-ok">
-
-                                            </div>
-                                        <?php endif; ?>
+                                    <?php if ($ai_percentage > 70): ?>
+                                        <div class="ai-warning">
+                                            <p><strong>Note:</strong> This content shows a high probability of AI
+                                                generation. If this work was submitted as original human work, please review
+                                                your institution's policies on AI-assisted writing.</p>
+                                        </div>
+                                    <?php elseif ($ai_percentage > 40): ?>
+                                        <div class="ai-caution">
+                                            <p><strong>Note:</strong> This content shows moderate indicators of AI
+                                                assistance. The writing may contain sections created with AI help.</p>
+                                        </div>
+                                    <?php else: ?>
+                                        <div class="ai-ok">
+                                            <p>This content shows low likelihood of AI authorship. It is likely to be
+                                                human-written.</p>
+                                        </div>
+                                    <?php endif; ?>
                                 </div>
                             </div>
                         <?php else: ?>
@@ -545,6 +686,7 @@ $question_number = $_GET['question_number'] ?? 'Unknown';
                         <?php endif; ?>
                     </div>
                 </div>
+
 
                 <?php
                 // Initialize plagiarism data - IMPROVED VERSION
@@ -709,7 +851,7 @@ $question_number = $_GET['question_number'] ?? 'Unknown';
                                                         style="margin-bottom: 20px; padding: 15px; background: #f8f9fa; border-radius: 8px; border-left: 4px solid #dc3545;">
                                                         <div class="source-header">
                                                             <p style="margin: 0 0 8px 0;">
-                                                                <strong style="color: #1b4242;">
+                                                                <!-- <strong style="color: #1b4242;">
                                                                     <?php
                                                                     $title = $source["title"] ?? 'Untitled Source';
                                                                     if (empty(trim($title))) {
@@ -717,7 +859,7 @@ $question_number = $_GET['question_number'] ?? 'Unknown';
                                                                     }
                                                                     echo htmlspecialchars($title);
                                                                     ?>
-                                                                </strong>
+                                                                </strong> -->
                                                             </p>
                                                         </div>
 
@@ -900,18 +1042,17 @@ $question_number = $_GET['question_number'] ?? 'Unknown';
             }
             ?>
 
-            <!-- In your HTML -->
+            <!-- In your HTML 
             <div class="comments">
                 <?php if (!empty(trim($teacher_comment))): ?>
                     <h2>Quiz Creator Comment</h2>
                     <div class="comment">
                         <p class="comment-text"><?php echo htmlspecialchars($teacher_comment); ?></p>
                         <div class="educators">
-                            <!-- ... instructor info ... -->
                         </div>
                     </div>
                 <?php endif; ?>
-            </div>
+            </div> -->
 
 
 
