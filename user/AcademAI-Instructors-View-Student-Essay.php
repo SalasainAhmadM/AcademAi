@@ -6,7 +6,12 @@ if (!isset($_SESSION['logged_in'])) {
 }
 
 include_once("../classes/connection.php");
+$db = new Database();
+$pdo = $db->connect();
 
+if (!$pdo) {
+    die("Database connection failed: " . print_r($db->getError(), true));
+}
 // Get current user info from session
 if (!isset($_SESSION['creation_id']))
     die("User data missing.");
@@ -20,7 +25,7 @@ $user = $stmt->fetch(PDO::FETCH_ASSOC);
 if ($user) {
     $full_name = trim($user['first_name'] . ' ' . $user['middle_name'] . ' ' . $user['last_name']);
     $email = $user['email'];
-    $photo_path = $user['photo_path'] ? '../' . $user['photo_path'] : '../img/default-avatar.jpg';
+    $photo_path = $user['photo_path'] ? $user['photo_path'] : '../img/default-avatar.jpg';
 } else {
     // Default values if user not found (shouldn't happen since they're logged in)
     $full_name = "User";
@@ -158,7 +163,7 @@ foreach ($questions as $index => $question) {
     <title>Quiz Answers | AcademAI</title>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
-
+    <link rel="icon" href="../img/light-logo-img.png" type="image/icon type">
     <style>
         :root {
             --primary: #092635;

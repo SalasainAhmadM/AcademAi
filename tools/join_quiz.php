@@ -1,8 +1,9 @@
 <?php
 session_start();
 header('Content-Type: application/json');
+date_default_timezone_set('Asia/Manila');
 
-$host   = 'localhost';
+$host = 'localhost';
 $dbname = 'academaidb';
 $username = 'root';
 $password = '';
@@ -38,7 +39,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['quiz_code'])) {
 
     if ($quiz) {
         error_log("Quiz found: " . print_r($quiz, true));
-        
+
         // Check if current user is the quiz owner
         if (isset($_SESSION['creation_id']) && $quiz['creation_id'] == $_SESSION['creation_id']) {
             error_log("Quiz owner attempted to join their own quiz.");
@@ -47,13 +48,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['quiz_code'])) {
         }
 
         $startDateTime = $quiz['start_date'] . ' ' . $quiz['start_time'];
-        $endDateTime   = $quiz['end_date']   . ' ' . $quiz['end_time'];
+        $endDateTime = $quiz['end_date'] . ' ' . $quiz['end_time'];
 
         if ($currentDateTime < $startDateTime) {
             error_log("Quiz is upcoming.");
             echo json_encode([
-                'status'     => 'upcoming',
-                'quiz_id'    => $quiz['quiz_id'],
+                'status' => 'upcoming',
+                'quiz_id' => $quiz['quiz_id'],
                 'start_date' => $quiz['start_date'],
                 'start_time' => $quiz['start_time'],
             ]);
@@ -66,10 +67,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['quiz_code'])) {
         } else {
             error_log("Quiz is done.");
             echo json_encode([
-                'status'    => 'done',
-                'quiz_id'   => $quiz['quiz_id'],
-                'end_date'  => $quiz['end_date'],
-                'end_time'  => $quiz['end_time']
+                'status' => 'done',
+                'quiz_id' => $quiz['quiz_id'],
+                'end_date' => $quiz['end_date'],
+                'end_time' => $quiz['end_time']
             ]);
         }
     } else {
@@ -89,7 +90,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['join_quiz']) && isset
 
     $userId = $_SESSION['creation_id'];
     $quizId = $_POST['quiz_id'];
-    
+
     $debug = [];
     $debug[] = "User ID: " . $userId;
     $debug[] = "Quiz ID: " . $quizId;
@@ -98,10 +99,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['join_quiz']) && isset
     try {
         $parentQuery = "SELECT creation_id FROM quizzes WHERE quiz_id = :quiz_id";
         $parentStmt = $conn->prepare($parentQuery);
-        $parentStmt->bindValue(':quiz_id', (int)$quizId, PDO::PARAM_INT);
+        $parentStmt->bindValue(':quiz_id', (int) $quizId, PDO::PARAM_INT);
         $parentStmt->execute();
         $quizData = $parentStmt->fetch(PDO::FETCH_ASSOC);
-        
+
         if (!$quizData) {
             error_log("No quiz exists with quiz_id {$quizId}.");
             echo json_encode([
@@ -123,28 +124,41 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['join_quiz']) && isset
         echo json_encode(['error' => 'Parent check error: ' . $e->getMessage(), 'debug' => $debug]);
         exit;
     }
-    
+
     // Rest of your existing participation check and insertion code...
     $checkQuery = "SELECT * FROM quiz_participation WHERE user_id = :user_id AND quiz_id = :quiz_id";
     $checkStmt = $conn->prepare($checkQuery);
-    $checkStmt->bindValue(':user_id', (int)$userId, PDO::PARAM_INT);
-    $checkStmt->bindValue(':quiz_id', (int)$quizId, PDO::PARAM_INT);
+    $checkStmt->bindValue(':user_id', (int) $userId, PDO::PARAM_INT);
+    $checkStmt->bindValue(':quiz_id', (int) $quizId, PDO::PARAM_INT);
     $checkStmt->execute();
-    
+
     if ($checkStmt->rowCount() > 0) {
-        $debug[] = "User already joined this quiz.";
-        error_log("User already joined this quiz.");
-        echo json_encode(['message' => 'You have already joined this quiz.', 'debug' => $debug]);
+        // Determine quiz status
+        $quizStatusQuery = "SELECT start_date, start_time, end_date, end_time FROM quizzes WHERE quiz_id = :quiz_id";
+        $quizStatusStmt = $conn->prepare($quizStatusQuery);
+        $quizStatusStmt->bindValue(':quiz_id', $quizId, PDO::PARAM_INT);
+        $quizStatusStmt->execute();
+        $quizDetails = $quizStatusStmt->fetch(PDO::FETCH_ASSOC);
+
+        $startDateTime = $quizDetails['start_date'] . ' ' . $quizDetails['start_time'];
+        $endDateTime = $quizDetails['end_date'] . ' ' . $quizDetails['end_time'];
+
+        if ($currentDateTime >= $startDateTime && $currentDateTime <= $endDateTime) {
+            echo json_encode(['message' => 'You have already joined this quiz.', 'status' => 'running']);
+        } else {
+            echo json_encode(['message' => 'You have already joined this quiz.', 'status' => 'upcoming']);
+        }
         exit;
     }
+
 
     try {
         $insertQuery = "INSERT INTO quiz_participation (quiz_id, user_id, join_date, status) 
                         VALUES (:quiz_id, :user_id, NOW(), 'pending')";
         $insertStmt = $conn->prepare($insertQuery);
-        $insertStmt->bindValue(':quiz_id', (int)$quizId, PDO::PARAM_INT);
-        $insertStmt->bindValue(':user_id', (int)$userId, PDO::PARAM_INT);
-        
+        $insertStmt->bindValue(':quiz_id', (int) $quizId, PDO::PARAM_INT);
+        $insertStmt->bindValue(':user_id', (int) $userId, PDO::PARAM_INT);
+
         if ($insertStmt->execute()) {
             $debug[] = "Insert successful.";
             error_log("Insert successful.");

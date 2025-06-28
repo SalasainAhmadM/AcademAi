@@ -635,21 +635,15 @@ require_once '../include/new-academai-sidebar.php';
                         document.getElementById('rubricTitle').value = '';
                         document.getElementById('rubricDescription').value = '';
 
-                        // Hide modal first
-                        $('#saveRubricModal').modal('hide');
 
-                        // Remove backdrop manually if needed
-                        $('.modal-backdrop').remove();
-
-                        // Reset body class
-                        document.body.classList.remove('modal-open');
-
-                        // Show alert after modal is fully hidden
+                        // Show success alert
                         setTimeout(() => {
                             Swal.fire({
                                 icon: 'success',
                                 title: 'Rubric Saved',
                                 text: 'Rubric saved successfully!'
+                            }).then(() => {
+                                location.reload();
                             });
                         }, 200);
                     } else {

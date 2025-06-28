@@ -1038,9 +1038,13 @@ if (!$userDetails) {
                                         timeDisplay.style.color = '#f44336';
                                         clearInterval(countdownTimer);
 
-                                        // Disable submission
+                                        // Disable submission button
                                         const submitBtn = document.getElementById('yes-submit-btn');
                                         if (submitBtn) submitBtn.disabled = true;
+
+                                        // Auto-submit the quiz form
+                                        const quizForm = document.getElementById('quizForm');
+                                        if (quizForm) quizForm.submit();
                                     }
                                 }
 
@@ -1121,7 +1125,7 @@ if (!$userDetails) {
                                         <textarea id="answeressay_<?php echo $index; ?>" name="answer_<?php echo $index; ?>"
                                             placeholder="Type your answer here..."
                                             oninput="validateWordCount(this, <?php echo $question['min_words']; ?>, <?php echo $question['max_words']; ?>, <?php echo $index; ?>); handleTextareaInput(this, <?php echo $index; ?>);">
-                                                                                                                                                                        </textarea>
+                                                                                                                                                                                                                                </textarea>
 
                                         <p id="wordCount_<?php echo $index; ?>" class="word-count">Words: 0 /
                                             <?php echo $question['max_words']; ?>

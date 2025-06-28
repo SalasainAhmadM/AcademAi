@@ -903,48 +903,53 @@ header("Referrer-Policy: strict-origin-when-cross-origin");
                         console.log("Server response:", response);
                         try {
                             const data = typeof response === 'string' ? JSON.parse(response) : response;
+
                             if (data.success) {
+                                // New join — redirect to upcoming or running
                                 const redirectPage = modalId === "upcoming-card-modal"
                                     ? "AcademAI-Activity-Upcoming-Card.php"
                                     : "AcademAI-Activity-Running-Card.php?quiz_id=" + quizId;
                                 window.location.href = redirectPage;
+
+                            } else if (data.message && data.message.includes("already joined")) {
+                                // Already joined — use returned status to redirect correctly
+                                if (data.status === 'running') {
+                                    window.location.href = "AcademAI-Join-Quiz-Essay.php?quiz_id=" + quizId;
+                                } else if (data.status === 'upcoming') {
+                                    window.location.href = "AcademAI-Activity-Upcoming-Card.php";
+                                } else {
+                                    Swal.fire({
+                                        icon: 'info',
+                                        text: 'The quiz has ended or is not accessible.'
+                                    });
+                                }
+
                             } else {
-                                // Always show the error message from server
                                 Swal.fire({
                                     icon: 'warning',
-                                    text: 'You have already joined this quiz.'
+                                    text: 'Unable to join the quiz.'
                                 });
                             }
+
                         } catch (e) {
                             console.error("Error parsing response:", e);
-                            // Check if raw response contains "already joined"
-                            if (typeof response === 'string' && response.includes("already joined")) {
-                                Swal.fire({
-                                    icon: 'warning',
-                                    text: 'You have already joined this quiz.'
-                                });
-                            } else {
-                                alert("An error occurred while processing the response.");
-                            }
+                            Swal.fire({
+                                icon: 'error',
+                                text: 'Unexpected error occurred.'
+                            });
                         }
                     },
                     error: function (error) {
                         console.error("AJAX error:", error);
-                        // Check if error response contains "already joined"
-                        if (error.responseText && error.responseText.includes("already joined")) {
-                            Swal.fire({
-                                icon: 'warning',
-                                text: 'You have already joined this quiz.'
-                            });
-                        } else {
-                            Swal.fire({
-                                icon: 'warning',
-                                text: 'You have already joined this quiz.'
-                            });
-                        }
+                        Swal.fire({
+                            icon: 'error',
+                            text: 'Network error while joining quiz.'
+                        });
                     }
                 });
             }
+
+
 
             function closeModal(modal) {
                 modal.style.display = "none";
