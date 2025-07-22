@@ -316,7 +316,13 @@ function insertEssayQuestions($conn, $quizId)
             }
 
             // Concatenate answers into a single string with a delimiter (e.g., |)
-            $concatenated_answers = implode('|', $question_answers);
+            // If no answers are provided, use "N/A"
+            if (empty($question_answers) || (is_array($question_answers) && count(array_filter($question_answers)) === 0)) {
+                $concatenated_answers = "N/A";
+            } else {
+                $concatenated_answers = implode('|', $question_answers);
+            }
+
 
             // Insert essay question into the database
             $sql_essay = "INSERT INTO essay_questions 

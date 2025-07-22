@@ -66,6 +66,29 @@ if ($rubric_id) {
     }
 }
 
+$show_teacher_benchmark = true; // Default to show
+
+if ($answer_id) {
+    // Check if we should hide teacher benchmark based on the conditions
+    $benchmarkCheckQuery = "
+        SELECT eq.answer 
+        FROM essay_evaluations ee
+        INNER JOIN essay_questions eq ON ee.question_id = eq.essay_id
+        WHERE ee.answer_id = :answer_id
+        LIMIT 1
+    ";
+
+    $benchmarkStmt = $conn->prepare($benchmarkCheckQuery);
+    $benchmarkStmt->bindParam(':answer_id', $answer_id, PDO::PARAM_INT);
+    $benchmarkStmt->execute();
+    $benchmarkResult = $benchmarkStmt->fetch(PDO::FETCH_ASSOC);
+
+    // Hide teacher benchmark if essay_questions.answer is "N/A"
+    if ($benchmarkResult && $benchmarkResult['answer'] === 'N/A') {
+        $show_teacher_benchmark = false;
+    }
+}
+
 // Fetch evaluations
 $evaluations = [];
 $teacher_comment = '';
@@ -344,7 +367,28 @@ $question_number = $_GET['question_number'] ?? 'Unknown';
 
 
 
+            <?php
+            // Fetch evaluations with compared_answer
+            $evaluations = [];
+            $teacher_comment = '';
+            $compared_answer_data = null;
 
+            if ($answer_id) {
+                $stmt = $conn->prepare("SELECT * FROM essay_evaluations WHERE answer_id = :answer_id");
+                $stmt->bindParam(':answer_id', $answer_id, PDO::PARAM_INT);
+                $stmt->execute();
+                $evaluations = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+                if (!empty($evaluations)) {
+                    $teacher_comment = $evaluations[0]['teacher_comment'] ?? '';
+
+                    // Parse compared_answer data
+                    if (!empty($evaluations[0]['compared_answer'])) {
+                        $compared_answer_data = json_decode($evaluations[0]['compared_answer'], true);
+                    }
+                }
+            }
+            ?>
 
 
             <div class="asess">
@@ -371,56 +415,246 @@ $question_number = $_GET['question_number'] ?? 'Unknown';
                                                 <?php
                                                 echo htmlspecialchars($criteriaName) . " -<br> Score: " . htmlspecialchars($criteriaData["score"]) . "%";
 
-                                                // Initialize level
+                                                // Initialize level and levelNumber
                                                 $level = '';
-
-                                                // Use regex to extract the level from the feedback
-                                                if (preg_match('/✅\s+Why\s+(\w[\w\s]*\w):/i', $criteriaData["feedback"], $matches)) {
-                                                    $level = trim($matches[1]);
-                                                }
-
-                                                // Compare header and level
                                                 $levelNumber = null;
-                                                if (isset($criteriaDatas['headers']) && is_array($criteriaDatas['headers'])) {
-                                                    foreach ($criteriaDatas['headers'] as $index => $header) {
-                                                        if (strcasecmp($header, $level) === 0) {
-                                                            $levelNumber = $index + 1; // Add 1 to make it human-readable (1-based index)
-                                                            break;
+
+                                                // Check if compared_answer_data exists and has matched_header
+                                                if (isset($compared_answer_data['matched_header']) && !empty($compared_answer_data['matched_header'])) {
+                                                    // Use the matched_header from compared_answer_data
+                                                    $level = $compared_answer_data['matched_header'];
+
+                                                    // Find the corresponding level number
+                                                    if (isset($criteriaDatas['headers']) && is_array($criteriaDatas['headers'])) {
+                                                        foreach ($criteriaDatas['headers'] as $index => $header) {
+                                                            if (strcasecmp($header, $level) === 0) {
+                                                                $levelNumber = $index + 1; // Add 1 to make it human-readable (1-based index)
+                                                                break;
+                                                            }
+                                                        }
+                                                    }
+                                                } else {
+                                                    // Fallback: Use regex to extract the level from the feedback (original logic)
+                                                    if (preg_match('/✅\s+Why\s+(\w[\w\s]*\w):/i', $criteriaData["feedback"], $matches)) {
+                                                        $level = trim($matches[1]);
+
+                                                        // Find the corresponding level number
+                                                        if (isset($criteriaDatas['headers']) && is_array($criteriaDatas['headers'])) {
+                                                            foreach ($criteriaDatas['headers'] as $index => $header) {
+                                                                if (strcasecmp($header, $level) === 0) {
+                                                                    $levelNumber = $index + 1; // Add 1 to make it human-readable (1-based index)
+                                                                    break;
+                                                                }
+                                                            }
                                                         }
                                                     }
                                                 }
 
-                                                echo "<br>Level: " . htmlspecialchars($level);
-                                                if ($levelNumber !== null) {
-                                                    echo " (" . htmlspecialchars($levelNumber) . ")";
-                                                }
+                                                // echo "<br>Level: " . htmlspecialchars($level);
+                                                // if ($levelNumber !== null) {
+                                                //     echo " (" . htmlspecialchars($levelNumber) . ")";
+                                                // }
                                                 ?>
+                                                <?php if (isset($compared_answer_data['matched_header']) && !empty($compared_answer_data['matched_header'])): ?>
+                                                    <?php
+                                                    $matchedHeader = $compared_answer_data['matched_header'];
+                                                    $levelIndex = array_search($matchedHeader, $criteriaDatas['headers']);
+                                                    $displayIndex = $levelIndex !== false ? $levelIndex + 1 : 'N/A';
+                                                    ?>
+                                                    <br>
+                                                    Level: <?php echo htmlspecialchars($matchedHeader); ?>
+                                                    (<?php echo $displayIndex; ?>)
+                                                <?php endif; ?>
+
                                             </p>
                                         </div>
 
 
+
                                         <div class="assess-feedback col-5">
                                             <p class="rubrics-explanation"><strong>Evaluation:</strong></p>
-                                            <?php
-                                            // Convert line break placeholder to actual <br> tags
-                                            $criteriaData["feedback"] = str_replace("**", "<br>", $criteriaData["feedback"]);
-                                            $feedbackLines = explode("<br>", $criteriaData["feedback"]);
-                                            $allowedLevels = array_map('strtolower', $criteriaDatas['headers'] ?? []); // Normalize headers (e.g., "Good", "Excellent")
-                                    
-                                            foreach ($feedbackLines as $line) {
-                                                $line = trim($line);
+                                            <?php if ($compared_answer_data): ?>
+                                                <!-- Content Comparison Section -->
+                                                <?php if (isset($compared_answer_data['content_comparison'])): ?>
+                                                    <div class="content-comparison"
+                                                        style="margin-bottom: 20px; padding: 15px; background: #f8f9fa; border-radius: 8px; border-left: 4px solid #007bff;">
+                                                        <p style="font-weight: bold; color: #1b4242;">📊 Content Analysis:</p>
 
-                                                // Match levels: "Why Excellent", "Why not Good", etc.
-                                                if (preg_match('/Why (not )?([\w\s]+):/i', $line, $match)) {
-                                                    $level = strtolower(trim($match[2])); // Extract "Excellent", "Good", etc.
-                                    
-                                                    if (in_array($level, $allowedLevels)) {
-                                                        echo "<p>$line</p>";
-                                                    }
-                                                }
-                                            }
-                                            ?>
-                                            <?php if (!empty($teacher_comment)): ?>
+                                                        <?php if (!empty($compared_answer_data['content_comparison']['key_points_covered'])): ?>
+                                                            <div class="key-points" style="margin-bottom: 15px;">
+                                                                <p style="font-weight: bold; color: #28a745; margin-bottom: 8px;">✅ Key
+                                                                    Points Covered:</p>
+                                                                <ul style="margin-left: 15px; color: #155724;">
+                                                                    <?php foreach ($compared_answer_data['content_comparison']['key_points_covered'] as $point): ?>
+                                                                        <li style="margin-bottom: 5px;"><?php echo htmlspecialchars($point); ?>
+                                                                        </li>
+                                                                    <?php endforeach; ?>
+                                                                </ul>
+                                                            </div>
+                                                        <?php endif; ?>
+
+                                                        <?php if (!empty($compared_answer_data['content_comparison']['missing_points'])): ?>
+                                                            <div class="missing-points" style="margin-bottom: 15px;">
+                                                                <p style="font-weight: bold; color: #dc3545; margin-bottom: 8px;">❌ Missing
+                                                                    Points:</p>
+                                                                <ul style="margin-left: 15px; color: #721c24;">
+                                                                    <?php foreach ($compared_answer_data['content_comparison']['missing_points'] as $point): ?>
+                                                                        <li style="margin-bottom: 5px;"><?php echo htmlspecialchars($point); ?>
+                                                                        </li>
+                                                                    <?php endforeach; ?>
+                                                                </ul>
+                                                            </div>
+                                                        <?php endif; ?>
+
+                                                        <?php if (!empty($compared_answer_data['content_comparison']['additional_points'])): ?>
+                                                            <div class="additional-points" style="margin-bottom: 15px;">
+                                                                <p style="font-weight: bold; color: #6f42c1; margin-bottom: 8px;">➕
+                                                                    Additional Points:</p>
+                                                                <ul style="margin-left: 15px; color: #495057;">
+                                                                    <?php foreach ($compared_answer_data['content_comparison']['additional_points'] as $point): ?>
+                                                                        <li style="margin-bottom: 5px;"><?php echo htmlspecialchars($point); ?>
+                                                                        </li>
+                                                                    <?php endforeach; ?>
+                                                                </ul>
+                                                            </div>
+                                                        <?php endif; ?>
+                                                    </div>
+                                                <?php endif; ?>
+
+                                                <!-- Detailed Analysis Section -->
+                                                <?php if (isset($compared_answer_data['detailed_analysis'])): ?>
+                                                    <div class="detailed-analysis"
+                                                        style="margin-bottom: 20px; padding: 15px; background: #fff3cd; border-radius: 8px; border-left: 4px solid #ffc107;">
+                                                        <p style="font-weight: bold; color: #1b4242;">🔍 Detailed Analysis:</p>
+
+                                                        <?php if (!empty($compared_answer_data['detailed_analysis']['strengths'])): ?>
+                                                            <div class="strengths" style="margin-bottom: 15px;">
+                                                                <p style="font-weight: bold; color: #28a745; margin-bottom: 8px;">💪
+                                                                    Strengths:</p>
+                                                                <ul style="margin-left: 15px; color: #155724;">
+                                                                    <?php foreach ($compared_answer_data['detailed_analysis']['strengths'] as $strength): ?>
+                                                                        <li style="margin-bottom: 5px;">
+                                                                            <?php echo htmlspecialchars($strength); ?>
+                                                                        </li>
+                                                                    <?php endforeach; ?>
+                                                                </ul>
+                                                            </div>
+                                                        <?php endif; ?>
+
+                                                        <?php if (!empty($compared_answer_data['detailed_analysis']['weaknesses'])): ?>
+                                                            <div class="weaknesses" style="margin-bottom: 15px;">
+                                                                <p style="font-weight: bold; color: #dc3545; margin-bottom: 8px;">⚠️ Areas
+                                                                    for Improvement:</p>
+                                                                <ul style="margin-left: 15px; color: #721c24;">
+                                                                    <?php foreach ($compared_answer_data['detailed_analysis']['weaknesses'] as $weakness): ?>
+                                                                        <li style="margin-bottom: 5px;">
+                                                                            <?php echo htmlspecialchars($weakness); ?>
+                                                                        </li>
+                                                                    <?php endforeach; ?>
+                                                                </ul>
+                                                            </div>
+                                                        <?php endif; ?>
+
+                                                        <?php if (!empty($compared_answer_data['detailed_analysis']['suggestions'])): ?>
+                                                            <div class="suggestions" style="margin-bottom: 15px;">
+                                                                <p style="font-weight: bold; color: #17a2b8; margin-bottom: 8px;">💡
+                                                                    Suggestions:</p>
+                                                                <ul style="margin-left: 15px; color: #0c5460;">
+                                                                    <?php foreach ($compared_answer_data['detailed_analysis']['suggestions'] as $suggestion): ?>
+                                                                        <li style="margin-bottom: 5px;">
+                                                                            <?php echo htmlspecialchars($suggestion); ?>
+                                                                        </li>
+                                                                    <?php endforeach; ?>
+                                                                </ul>
+                                                            </div>
+                                                        <?php endif; ?>
+                                                    </div>
+                                                <?php endif; ?>
+
+                                                <!-- Rubric Alignment and Recommendation Section -->
+                                                <!-- <div class="rubric-recommendation"
+                                                    style="margin-bottom: 20px; padding: 15px; background: #e8f5e8; border-radius: 8px; border-left: 4px solid #28a745;">
+                                                    <?php if (isset($compared_answer_data['matched_header'])): ?>
+                                                        <div class="matched-level" style="margin-bottom: 15px;">
+                                                            <p style="font-weight: bold; color: #1b4242; margin-bottom: 8px;">🎯
+                                                                Performance Level:</p>
+                                                            <p style="color: #155724; font-weight: bold; font-size: 1.1em;">
+                                                                <?php echo htmlspecialchars($compared_answer_data['matched_header']); ?>
+                                                            </p>
+                                                        </div>
+                                                    <?php endif; ?>
+
+                                                    <?php if (isset($compared_answer_data['similarity_score'])): ?>
+                                                        <div class="similarity-score" style="margin-bottom: 15px;">
+                                                            <p style="font-weight: bold; color: #1b4242; margin-bottom: 8px;">📈
+                                                                Similarity Score:</p>
+                                                            <p style="color: #495057;">
+                                                                <?php echo number_format($compared_answer_data['similarity_score'], 2); ?>%
+                                                            </p>
+                                                        </div>
+                                                    <?php endif; ?> -->
+
+                                                <!-- <?php if (isset($compared_answer_data['recommendation'])): ?>
+                                                        <div class="recommendation" style="margin-bottom: 15px;">
+                                                            <p style="font-weight: bold; color: #1b4242; margin-bottom: 8px;">📝
+                                                                Recommendation:</p>
+                                                            <p style="color: #495057; line-height: 1.6;">
+                                                                <?php echo htmlspecialchars($compared_answer_data['recommendation']); ?>
+                                                            </p>
+                                                        </div>
+                                                    <?php endif; ?> 
+                                            </div> -->
+
+                                                <!-- Rubric Alignment Details (if available) -->
+                                                <?php if (isset($compared_answer_data['rubric_alignment'])): ?>
+                                                    <div class="rubric-alignment"
+                                                        style="margin-bottom: 20px; padding: 15px; background: #f0f0f0; border-radius: 8px; border-left: 4px solid #6c757d;">
+                                                        <p style="font-weight: bold; color: #1b4242;">📋 Rubric Alignment:</p>
+
+                                                        <?php if (!empty($compared_answer_data['rubric_alignment']['criteria_met'])): ?>
+                                                            <div class="criteria-met" style="margin-bottom: 10px;">
+                                                                <p style="font-weight: bold; color: #28a745; margin-bottom: 5px;">✅ Criteria
+                                                                    Fully Met:</p>
+                                                                <ul style="margin-left: 15px; color: #155724;">
+                                                                    <?php foreach ($compared_answer_data['rubric_alignment']['criteria_met'] as $criteria): ?>
+                                                                        <li><?php echo htmlspecialchars($criteria); ?></li>
+                                                                    <?php endforeach; ?>
+                                                                </ul>
+                                                            </div>
+                                                        <?php endif; ?>
+
+                                                        <?php if (!empty($compared_answer_data['rubric_alignment']['criteria_partially_met'])): ?>
+                                                            <div class="criteria-partially-met" style="margin-bottom: 10px;">
+                                                                <p style="font-weight: bold; color: #ffc107; margin-bottom: 5px;">⚠️
+                                                                    Criteria Partially Met:</p>
+                                                                <ul style="margin-left: 15px; color: #856404;">
+                                                                    <?php foreach ($compared_answer_data['rubric_alignment']['criteria_partially_met'] as $criteria): ?>
+                                                                        <li><?php echo htmlspecialchars($criteria); ?></li>
+                                                                    <?php endforeach; ?>
+                                                                </ul>
+                                                            </div>
+                                                        <?php endif; ?>
+
+                                                        <?php if (!empty($compared_answer_data['rubric_alignment']['criteria_not_met'])): ?>
+                                                            <div class="criteria-not-met" style="margin-bottom: 10px;">
+                                                                <p style="font-weight: bold; color: #dc3545; margin-bottom: 5px;">❌ Criteria
+                                                                    Not Met:</p>
+                                                                <ul style="margin-left: 15px; color: #721c24;">
+                                                                    <?php foreach ($compared_answer_data['rubric_alignment']['criteria_not_met'] as $criteria): ?>
+                                                                        <li><?php echo htmlspecialchars($criteria); ?></li>
+                                                                    <?php endforeach; ?>
+                                                                </ul>
+                                                            </div>
+                                                        <?php endif; ?>
+                                                    </div>
+                                                <?php endif; ?>
+
+                                            <?php else: ?>
+                                                <p style="color: #6c757d; font-style: italic;">No detailed comparison data available
+                                                    for this submission.</p>
+                                            <?php endif; ?>
+
+                                            <?php if (!empty($teacher_comment) && $show_teacher_benchmark): ?>
                                                 <div class="teacher-benchmark"
                                                     style="margin-top: 15px; border-top: 1px solid #ccc; padding-top: 10px;">
                                                     <p style="font-weight: bold; color: #1b4242;">📊 Creators Benchmark:</p>
