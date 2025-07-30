@@ -214,7 +214,7 @@ class EssayEvaluator
         'Content-Type: application/json',
         'Content-Length: ' . strlen($jsonData)
       ],
-      CURLOPT_TIMEOUT => 90,
+      CURLOPT_TIMEOUT => 120, // Increased timeout for individual criteria analysis
       CURLOPT_CONNECTTIMEOUT => 30,
       CURLOPT_SSL_VERIFYPEER => false,
       CURLOPT_FOLLOWLOCATION => true,
@@ -250,9 +250,137 @@ class EssayEvaluator
       ];
     }
 
+    if (isset($result['criteria_analysis']) && is_array($result['criteria_analysis'])) {
+      $result['formatted_criteria_analysis'] = $this->formatIndividualCriteriaAnalysis($result['criteria_analysis']);
+    }
+
     return $result;
   }
+  private function formatIndividualCriteriaAnalysis($criteriaAnalysis)
+  {
+    $formatted = [];
 
+    foreach ($criteriaAnalysis as $criterionName => $analysis) {
+      $formatted[$criterionName] = [
+        'criterion_name' => $analysis['criterion_name'] ?? $criterionName,
+        'score' => $analysis['similarity_score'] ?? 0,
+        'level' => $analysis['matched_level'] ?? 'Unknown',
+        'strengths' => $analysis['criterion_analysis']['strengths'] ?? [],
+        'weaknesses' => $analysis['criterion_analysis']['weaknesses'] ?? [],
+        'suggestions' => $analysis['criterion_analysis']['suggestions'] ?? [],
+        'key_points_covered' => $analysis['criterion_analysis']['key_points_covered'] ?? [],
+        'missing_points' => $analysis['criterion_analysis']['missing_points'] ?? [],
+        'performance_assessment' => $analysis['performance_level'] ?? '',
+        'comparison_details' => $analysis['criterion_comparison'] ?? '',
+        'improvement_focus' => $analysis['improvement_focus'] ?? ''
+      ];
+    }
+
+    return $formatted;
+  }
+
+  /**
+   * Generate a summary report from individual criteria analysis
+   */
+  public function generateCriteriaSummaryReport($compareResult)
+  {
+    if (!isset($compareResult['criteria_analysis']) || !is_array($compareResult['criteria_analysis'])) {
+      return "Individual criteria analysis not available.";
+    }
+
+    $summary = "INDIVIDUAL CRITERIA ANALYSIS REPORT\n";
+    $summary .= str_repeat("=", 50) . "\n\n";
+
+    // Overall scores
+    $summary .= "OVERALL PERFORMANCE:\n";
+    $summary .= "Overall Similarity Score: " . ($compareResult['overall_similarity_score'] ?? 'N/A') . "%\n";
+    $summary .= "Overall Level: " . ($compareResult['overall_matched_header'] ?? 'N/A') . "\n\n";
+
+    // Individual criteria breakdown
+    $summary .= "INDIVIDUAL CRITERIA BREAKDOWN:\n";
+    $summary .= str_repeat("-", 40) . "\n\n";
+
+    foreach ($compareResult['criteria_analysis'] as $criterionName => $analysis) {
+      $summary .= "CRITERION: " . strtoupper($criterionName) . "\n";
+      $summary .= "Score: " . ($analysis['similarity_score'] ?? 'N/A') . "%\n";
+      $summary .= "Level: " . ($analysis['matched_level'] ?? 'N/A') . "\n";
+
+      // Performance assessment
+      if (!empty($analysis['performance_level'])) {
+        $summary .= "Assessment: " . $analysis['performance_level'] . "\n";
+      }
+
+      // Strengths
+      if (!empty($analysis['criterion_analysis']['strengths'])) {
+        $summary .= "Strengths:\n";
+        foreach ($analysis['criterion_analysis']['strengths'] as $strength) {
+          $summary .= "  • " . $strength . "\n";
+        }
+      }
+
+      // Weaknesses
+      if (!empty($analysis['criterion_analysis']['weaknesses'])) {
+        $summary .= "Weaknesses:\n";
+        foreach ($analysis['criterion_analysis']['weaknesses'] as $weakness) {
+          $summary .= "  • " . $weakness . "\n";
+        }
+      }
+
+      // Suggestions
+      if (!empty($analysis['criterion_analysis']['suggestions'])) {
+        $summary .= "Suggestions for Improvement:\n";
+        foreach ($analysis['criterion_analysis']['suggestions'] as $suggestion) {
+          $summary .= "  • " . $suggestion . "\n";
+        }
+      }
+
+      $summary .= "\n" . str_repeat("-", 40) . "\n\n";
+    }
+
+    // Overall analysis summary
+    if (isset($compareResult['overall_analysis'])) {
+      $overall = $compareResult['overall_analysis'];
+
+      $summary .= "OVERALL SUMMARY:\n";
+      $summary .= str_repeat("-", 20) . "\n";
+
+      if (!empty($overall['summary'])) {
+        $summary .= $overall['summary'] . "\n\n";
+      }
+
+      if (!empty($overall['overall_strengths'])) {
+        $summary .= "Key Strengths Across All Criteria:\n";
+        foreach ($overall['overall_strengths'] as $strength) {
+          $summary .= "  • " . $strength . "\n";
+        }
+        $summary .= "\n";
+      }
+
+      if (!empty($overall['overall_weaknesses'])) {
+        $summary .= "Areas for Improvement Across All Criteria:\n";
+        foreach ($overall['overall_weaknesses'] as $weakness) {
+          $summary .= "  • " . $weakness . "\n";
+        }
+        $summary .= "\n";
+      }
+
+      if (!empty($overall['overall_suggestions'])) {
+        $summary .= "Priority Recommendations:\n";
+        foreach ($overall['overall_suggestions'] as $suggestion) {
+          $summary .= "  • " . $suggestion . "\n";
+        }
+      }
+    }
+
+    // Detailed recommendation
+    if (!empty($compareResult['detailed_recommendation'])) {
+      $summary .= "\nDETAILED RECOMMENDATION:\n";
+      $summary .= str_repeat("-", 25) . "\n";
+      $summary .= $compareResult['detailed_recommendation'] . "\n";
+    }
+
+    return $summary;
+  }
   /**
    * Initialize database table for essay evaluations
    */
@@ -692,7 +820,7 @@ strictly follow the format of example output:
 
     foreach ($questions as $question) {
       // Build reference answer
-      $this->kiss .= "Reference answer for number 1: " . ($question["answer"] ?? '') . "\n";
+      $this->kiss .= "Reference answer for number " . ($question['essay_id'] ?? 'unknown') . ": " . ($question["answer"] ?? '') . "\n";
 
       // Get rubric data
       $decodedData = $this->getRubricData($question['rubric_id']);
@@ -765,10 +893,19 @@ strictly follow the format of example output:
             );
 
             if (isset($compareResult['success']) && $compareResult['success']) {
-              $comparedAnswer = json_encode($compareResult);
-            } elseif (isset($compareResult['similarity_score']) || isset($compareResult['matched_header'])) {
-              // Handle case where API returns data without explicit success flag
-              $comparedAnswer = json_encode($compareResult);
+              // Generate formatted summary report for storage
+              $criteriaReport = $this->generateCriteriaSummaryReport($compareResult);
+
+              // Store both the raw analysis and formatted report
+              $comparedAnswer = json_encode([
+                'individual_criteria_analysis' => $compareResult['criteria_analysis'] ?? [],
+                'overall_analysis' => $compareResult['overall_analysis'] ?? [],
+                'formatted_report' => $criteriaReport,
+                'overall_similarity_score' => $compareResult['overall_similarity_score'] ?? 0,
+                'overall_matched_header' => $compareResult['overall_matched_header'] ?? 'Unknown',
+                'detailed_recommendation' => $compareResult['detailed_recommendation'] ?? '',
+                'comparison_timestamp' => $compareResult['comparison_timestamp'] ?? time()
+              ]);
             }
           }
 

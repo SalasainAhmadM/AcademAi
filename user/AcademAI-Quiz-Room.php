@@ -799,29 +799,29 @@ header("Referrer-Policy: strict-origin-when-cross-origin");
                     activeModal = null;
                 }
 
-                // Inside your existing script, find this fetch request:
+
+                // Replace the existing fetch response handler in your script with this modified version:
                 fetch('../tools/join_quiz.php', {
                     method: 'POST',
                     body: formData
                 })
                     .then(response => response.json())
-                    .then(data => {  // <-- INSERT THE CODE RIGHT AFTER THIS LINE
+                    .then(data => {
                         console.log("Response Data:", data);
+
                         if (data.error) {
                             if (data.error.includes("already joined")) {
                                 Swal.fire({
                                     icon: 'warning',
                                     text: 'You have already joined this quiz.'
                                 });
-                                // alert("You have already joined this quiz.");
                             } else if (data.error.includes("quiz owner")) {
                                 Swal.fire({
                                     icon: 'warning',
                                     text: 'You cannot join your own quiz as the creator.'
                                 });
-                                // alert("You cannot join your own quiz as the creator.");
                             } else {
-                                alert(data.error); // Show the exact error message from server
+                                alert(data.error);
                             }
                             return;
                         }
@@ -829,14 +829,31 @@ header("Referrer-Policy: strict-origin-when-cross-origin");
                         currentQuizId = data.quiz_id || null;
 
                         if (data.already_joined) {
-                            Swal.fire({
-                                icon: 'warning',
-                                text: 'You have already joined this quiz.'
-                            });
-                            // alert("You have already joined this quiz.");
-                            return;
+                            // If already joined and quiz is running, show confirmation before redirect
+                            if (data.status === 'running') {
+                                Swal.fire({
+                                    title: 'Quiz is Running!',
+                                    text: 'This quiz is currently in progress. Do you want to join now?',
+                                    icon: 'question',
+                                    showCancelButton: true,
+                                    confirmButtonColor: '#092635',
+                                    cancelButtonColor: '#d33',
+                                    confirmButtonText: 'Yes, Join Now!',
+                                    cancelButtonText: 'Cancel'
+                                }).then((result) => {
+                                    if (result.isConfirmed) {
+                                        window.location.href = `AcademAI-Join-Quiz-Essay.php?quiz_id=${currentQuizId}`;
+                                    }
+                                });
+                                return;
+                            } else {
+                                Swal.fire({
+                                    icon: 'warning',
+                                    text: 'You have already joined this quiz.'
+                                });
+                                return;
+                            }
                         }
-
 
                         // Clear any previous modal before showing new one
                         if (activeModal) {
@@ -846,7 +863,21 @@ header("Referrer-Policy: strict-origin-when-cross-origin");
                         if (data.status === 'upcoming') {
                             showModal("upcoming-card-modal", `This quiz will be available on ${data.start_date} at ${data.start_time}. Do you want to join this quiz for now?`);
                         } else if (data.status === 'running') {
-                            showModal("running-card-modal", "This quiz is currently running. Do you want to join?");
+                            // For running quizzes, show confirmation before joining and redirecting
+                            Swal.fire({
+                                title: 'Quiz is Running!',
+                                text: 'This quiz is currently in progress. Do you want to join now?',
+                                icon: 'question',
+                                showCancelButton: true,
+                                confirmButtonColor: '#092635',
+                                cancelButtonColor: '#d33',
+                                confirmButtonText: 'Yes, Join Now!',
+                                cancelButtonText: 'Cancel'
+                            }).then((result) => {
+                                if (result.isConfirmed) {
+                                    joinQuizAndRedirect(currentQuizId);
+                                }
+                            });
                         } else if (data.status === 'done') {
                             showModal("not-taken-card-modal", `The quiz you attempted to join is no longer active as it has expired on ${data.end_date} at ${data.end_time}.`);
                         } else {
@@ -858,6 +889,61 @@ header("Referrer-Policy: strict-origin-when-cross-origin");
                         console.error("Error:", error);
                         alert("An error occurred. Please try again.");
                     });
+
+                // Update the joinQuizAndRedirect function to also show confirmation for loading state
+                function joinQuizAndRedirect(quizId) {
+                    // Show loading state
+                    Swal.fire({
+                        title: 'Joining Quiz...',
+                        text: 'Please wait while we connect you to the quiz.',
+                        allowOutsideClick: false,
+                        allowEscapeKey: false,
+                        showConfirmButton: false,
+                        didOpen: () => {
+                            Swal.showLoading();
+                        }
+                    });
+
+                    $.ajax({
+                        url: '../tools/join_quiz.php',
+                        type: 'POST',
+                        data: {
+                            join_quiz: true,
+                            quiz_id: quizId
+                        },
+                        success: function (response) {
+                            console.log("Server response:", response);
+                            try {
+                                const data = typeof response === 'string' ? JSON.parse(response) : response;
+
+                                if (data.success || (data.message && data.message.includes("already joined"))) {
+                                    // Close loading and redirect to the quiz page for running quizzes
+                                    Swal.close();
+                                    window.location.href = `AcademAI-Join-Quiz-Essay.php?quiz_id=${quizId}`;
+                                } else {
+                                    Swal.fire({
+                                        icon: 'warning',
+                                        text: 'Unable to join the quiz.'
+                                    });
+                                }
+
+                            } catch (e) {
+                                console.error("Error parsing response:", e);
+                                Swal.fire({
+                                    icon: 'error',
+                                    text: 'Unexpected error occurred.'
+                                });
+                            }
+                        },
+                        error: function (error) {
+                            console.error("AJAX error:", error);
+                            Swal.fire({
+                                icon: 'error',
+                                text: 'Network error while joining quiz.'
+                            });
+                        }
+                    });
+                }
             });
 
             function showModal(modalId, message) {

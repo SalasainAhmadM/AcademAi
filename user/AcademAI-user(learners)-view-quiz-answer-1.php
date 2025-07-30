@@ -99,29 +99,91 @@ foreach ($questions as $index => $question) {
         $stmt = $pdo->prepare("SELECT * FROM essay_evaluations WHERE answer_id = ? ORDER BY evaluation_date DESC LIMIT 1");
         $stmt->execute([$answer['answer_id']]);
         $evaluation = $stmt->fetch(PDO::FETCH_ASSOC);
+        // start - uncomment this for backup
+        // if ($evaluation) {
+        //     $evalData = json_decode(str_replace(
+        //         ["```json\n", "\n```"],
+        //         "",
+        //         json_decode($evaluation['evaluation_data'], true)["evaluation"]["evaluation"]
+        //     ), true);
 
+        //     $points_per_item = $question['points_per_item'];
+        //     $score = $evalData["overall_weighted_score"];
+        //     $earnedPoints = ($score / 100) * $points_per_item;
+        //     $totalPoints += $earnedPoints;
+
+        //     $questionData[$index]['evaluation'] = [
+        //         'data' => $evalData,
+        //         'score' => $score,
+        //         'earnedPoints' => $earnedPoints,
+        //         'points_possible' => $points_per_item
+        //     ];
+
+        //     // Create assessment link with all required parameters
+        //     $questionData[$index]['rubric_link'] = "AcademAI-Assessment.php?quiz_id=$quiz_id&answer_id={$answer['answer_id']}&rubric_id={$question['rubric_id']}";
+        // }
+// end
+
+        // start
         if ($evaluation) {
-            $evalData = json_decode(str_replace(
-                ["```json\n", "\n```"],
-                "",
-                json_decode($evaluation['evaluation_data'], true)["evaluation"]["evaluation"]
-            ), true);
+            // First, safely decode the evaluation_data
+            $evaluationData = json_decode($evaluation['evaluation_data'], true);
 
-            $points_per_item = $question['points_per_item'];
-            $score = $evalData["overall_weighted_score"];
-            $earnedPoints = ($score / 100) * $points_per_item;
-            $totalPoints += $earnedPoints;
+            // Check if the decoded data is valid and has the expected structure
+            if (
+                $evaluationData &&
+                isset($evaluationData["evaluation"]) &&
+                isset($evaluationData["evaluation"]["evaluation"])
+            ) {
 
-            $questionData[$index]['evaluation'] = [
-                'data' => $evalData,
-                'score' => $score,
-                'earnedPoints' => $earnedPoints,
-                'points_possible' => $points_per_item
-            ];
+                // Safely extract and clean the evaluation string
+                $evaluationString = $evaluationData["evaluation"]["evaluation"];
+                $cleanedEvaluation = str_replace(["```json\n", "\n```"], "", $evaluationString);
 
-            // Create assessment link with all required parameters
-            $questionData[$index]['rubric_link'] = "AcademAI-Assessment.php?quiz_id=$quiz_id&answer_id={$answer['answer_id']}&rubric_id={$question['rubric_id']}";
+                // Decode the cleaned evaluation data
+                $evalData = json_decode($cleanedEvaluation, true);
+
+                // Check if evalData is valid and has the required key
+                if ($evalData && isset($evalData["overall_weighted_score"])) {
+                    $points_per_item = $question['points_per_item'];
+                    $score = $evalData["overall_weighted_score"];
+                    $earnedPoints = ($score / 100) * $points_per_item;
+                    $totalPoints += $earnedPoints;
+
+                    $questionData[$index]['evaluation'] = [
+                        'data' => $evalData,
+                        'score' => $score,
+                        'earnedPoints' => $earnedPoints,
+                        'points_possible' => $points_per_item
+                    ];
+
+                    // Create assessment link with all required parameters
+                    $questionData[$index]['rubric_link'] = "AcademAI-Assessment.php?quiz_id=$quiz_id&answer_id={$answer['answer_id']}&rubric_id={$question['rubric_id']}";
+                } else {
+                    // Handle case where evalData is invalid or missing overall_weighted_score
+                    $questionData[$index]['evaluation'] = [
+                        'data' => null,
+                        'score' => 0,
+                        'earnedPoints' => 0,
+                        'points_possible' => $question['points_per_item'],
+                        'error' => 'Invalid evaluation data structure'
+                    ];
+                }
+            } else {
+                // Handle case where evaluation_data structure is invalid
+                $questionData[$index]['evaluation'] = [
+                    'data' => null,
+                    'score' => 0,
+                    'earnedPoints' => 0,
+                    'points_possible' => $question['points_per_item'],
+                    'error' => 'Invalid evaluation data format'
+                ];
+            }
+        } else {
+            // No evaluation found - this was already handled in your original code
+            $questionData[$index]['evaluation'] = null;
         }
+        // end
     }
 }
 

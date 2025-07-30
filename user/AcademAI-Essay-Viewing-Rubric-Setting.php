@@ -299,7 +299,301 @@ require_once '../include/new-academai-sidebar.php';
 
 
 
+    <script>
+        // Add this validation script to your existing JavaScript code
 
+        // Validation functions
+        function isValidText(text) {
+            if (!text || typeof text !== 'string') return false;
+
+            // Remove extra whitespace and check if empty
+            const trimmed = text.trim();
+            if (trimmed.length === 0) return false;
+
+            // Check for minimum length (at least 2 characters)
+            if (trimmed.length < 2) return false;
+
+            // Check if text contains at least one letter
+            if (!/[a-zA-Z]/.test(trimmed)) return false;
+
+            // Check if text is not just numbers or special characters
+            if (/^[\d\s\W]+$/.test(trimmed)) return false;
+
+            // Check for common placeholder text
+            const placeholders = ['xxx', 'test', 'sample', 'placeholder', 'temp'];
+            if (placeholders.includes(trimmed.toLowerCase())) return false;
+
+            return true;
+        }
+
+        function isValidSentence(text) {
+            if (!isValidText(text)) return false;
+
+            const trimmed = text.trim();
+
+            // Check for minimum word count (at least 2 words for descriptions)
+            const words = trimmed.split(/\s+/).filter(word => word.length > 0);
+            if (words.length < 2) return false;
+
+            // Check if it's a meaningful sentence (not just repeated characters)
+            if (/^(.)\1*$/.test(trimmed.replace(/\s/g, ''))) return false;
+
+            return true;
+        }
+
+        function validateRubricContent() {
+            let isValid = true;
+            const errors = [];
+
+            // Get all criteria inputs
+            const criteriaInputs = document.querySelectorAll('#rubricsTable tbody tr td:first-child input');
+            criteriaInputs.forEach((input, index) => {
+                if (!isValidText(input.value)) {
+                    isValid = false;
+                    input.style.borderColor = '#dc3545';
+                    input.title = 'Please enter a valid criteria name';
+                    errors.push(`Row ${index + 1}: Invalid criteria name`);
+                } else {
+                    input.style.borderColor = '';
+                    input.title = '';
+                }
+            });
+
+            // Get all description textareas (excluding weight column)
+            const descriptionTextareas = document.querySelectorAll('#rubricsTable tbody tr td:not(:first-child):not(:last-child) textarea');
+            descriptionTextareas.forEach((textarea, index) => {
+                if (!isValidSentence(textarea.value)) {
+                    isValid = false;
+                    textarea.style.borderColor = '#dc3545';
+                    textarea.title = 'Please enter a meaningful description (at least 2 words)';
+                    errors.push(`Cell ${index + 1}: Invalid description`);
+                } else {
+                    textarea.style.borderColor = '';
+                    textarea.title = '';
+                }
+            });
+
+            // Check weights
+            const weightInputs = document.querySelectorAll('#rubricsTable tbody tr td:last-child input');
+            let totalWeight = 0;
+            weightInputs.forEach((input, index) => {
+                const weight = parseFloat(input.value);
+                if (isNaN(weight) || weight < 0) {
+                    isValid = false;
+                    input.style.borderColor = '#dc3545';
+                    input.title = 'Please enter a valid weight percentage';
+                    errors.push(`Row ${index + 1}: Invalid weight`);
+                } else {
+                    input.style.borderColor = '';
+                    input.title = '';
+                    totalWeight += weight;
+                }
+            });
+
+            // Check if total weight is 100%
+            if (Math.abs(totalWeight - 100) > 0.01) {
+                isValid = false;
+                weightInputs.forEach(input => {
+                    input.style.borderColor = '#dc3545';
+                    input.title = `Total weight must be 100% (current: ${totalWeight.toFixed(2)}%)`;
+                });
+                errors.push(`Total weight must be 100% (current: ${totalWeight.toFixed(2)}%)`);
+            }
+
+            return { isValid, errors };
+        }
+
+        function updateSaveButtonState() {
+            const saveButton = document.getElementById('saveNewBtn');
+            const validation = validateRubricContent();
+
+            if (validation.isValid) {
+                saveButton.disabled = false;
+                saveButton.style.opacity = '1';
+                saveButton.style.cursor = 'pointer';
+                saveButton.title = 'Save as New Rubric';
+            } else {
+                saveButton.disabled = true;
+                saveButton.style.opacity = '0.6';
+                saveButton.style.cursor = 'not-allowed';
+                saveButton.title = 'Please fix validation errors:\n' + validation.errors.join('\n');
+            }
+        }
+
+        // Enhanced save function with validation
+        function saveNewRubricWithValidation() {
+            const validation = validateRubricContent();
+
+            if (!validation.isValid) {
+                Swal.fire({
+                    icon: 'error',
+                    title: 'Validation Errors',
+                    html: '<div style="text-align: left;"><strong>Please fix the following issues:</strong><br>' +
+                        validation.errors.map(error => `• ${error}`).join('<br>') + '</div>',
+                    confirmButtonText: 'Fix Issues'
+                });
+                return;
+            }
+
+            // If validation passes, proceed with normal save
+            saveNewRubric();
+        }
+
+        // Enhanced confirm save with validation
+        function confirmSaveRubricWithValidation() {
+            const validation = validateRubricContent();
+
+            if (!validation.isValid) {
+                Swal.fire({
+                    icon: 'error',
+                    title: 'Cannot Save Rubric',
+                    html: '<div style="text-align: left;"><strong>Please fix the following issues:</strong><br>' +
+                        validation.errors.map(error => `• ${error}`).join('<br>') + '</div>',
+                    confirmButtonText: 'Fix Issues'
+                });
+                return;
+            }
+
+            const title = document.getElementById('rubricTitle').value.trim();
+            const description = document.getElementById('rubricDescription').value.trim();
+
+            // Check modal fields
+            if (!isValidText(title)) {
+                Swal.fire({
+                    icon: 'warning',
+                    title: 'Invalid Title',
+                    text: 'Please enter a valid rubric title.'
+                });
+                return;
+            }
+
+            if (!isValidSentence(description)) {
+                Swal.fire({
+                    icon: 'warning',
+                    title: 'Invalid Description',
+                    text: 'Please enter a meaningful description (at least 2 words).'
+                });
+                return;
+            }
+
+            // If all validation passes, proceed with save
+            confirmSaveRubric();
+        }
+
+        // Add real-time validation listeners
+        function addValidationListeners() {
+            // Add input listeners to all form elements
+            const tableContainer = document.getElementById('tableContainer');
+
+            if (tableContainer) {
+                tableContainer.addEventListener('input', function (e) {
+                    // Debounce validation to avoid excessive calls
+                    clearTimeout(window.validationTimeout);
+                    window.validationTimeout = setTimeout(updateSaveButtonState, 300);
+                });
+
+                tableContainer.addEventListener('change', function (e) {
+                    updateSaveButtonState();
+                });
+            }
+
+            // Initial validation
+            setTimeout(updateSaveButtonState, 500);
+        }
+
+        // Override the original functions
+        document.addEventListener('DOMContentLoaded', function () {
+            // Wait for the original functions to be defined, then override
+            setTimeout(() => {
+                // Replace the original event listeners
+                const saveNewBtn = document.getElementById('saveNewBtn');
+                const confirmSaveBtn = document.getElementById('confirmSaveBtn');
+
+                if (saveNewBtn) {
+                    // Remove existing listeners and add new one
+                    saveNewBtn.removeEventListener('click', saveNewRubric);
+                    saveNewBtn.addEventListener('click', saveNewRubricWithValidation);
+                }
+
+                if (confirmSaveBtn) {
+                    // Remove existing listeners and add new one
+                    confirmSaveBtn.removeEventListener('click', confirmSaveRubric);
+                    confirmSaveBtn.addEventListener('click', confirmSaveRubricWithValidation);
+                }
+
+                // Add validation listeners
+                addValidationListeners();
+
+                // Override the addTableRow function to include validation listeners
+                const originalAddTableRow = window.addTableRow;
+                window.addTableRow = function (...args) {
+                    const result = originalAddTableRow.apply(this, args);
+                    setTimeout(updateSaveButtonState, 100);
+                    return result;
+                };
+
+                // Override the refreshTable function
+                const originalRefreshTable = window.refreshTable;
+                window.refreshTable = function (...args) {
+                    const result = originalRefreshTable.apply(this, args);
+                    setTimeout(() => {
+                        addValidationListeners();
+                        updateSaveButtonState();
+                    }, 100);
+                    return result;
+                };
+
+            }, 1000);
+        });
+
+        // Add CSS for validation styling
+        const validationCSS = `
+<style>
+.validation-error {
+    border-color: #dc3545 !important;
+    box-shadow: 0 0 0 0.2rem rgba(220, 53, 69, 0.25) !important;
+}
+
+.validation-success {
+    border-color: #28a745 !important;
+}
+
+#saveNewBtn:disabled {
+    background-color: #6c757d !important;
+    border-color: #6c757d !important;
+    opacity: 0.6 !important;
+    cursor: not-allowed !important;
+}
+
+#saveNewBtn:disabled:hover {
+    background-color: #6c757d !important;
+    border-color: #6c757d !important;
+}
+
+.validation-tooltip {
+    position: relative;
+}
+
+.validation-tooltip:hover::after {
+    content: attr(title);
+    position: absolute;
+    bottom: 100%;
+    left: 50%;
+    transform: translateX(-50%);
+    background-color: #333;
+    color: white;
+    padding: 5px 10px;
+    border-radius: 4px;
+    font-size: 12px;
+    white-space: nowrap;
+    z-index: 1000;
+}
+</style>
+`;
+
+        // Inject the CSS
+        document.head.insertAdjacentHTML('beforeend', validationCSS);
+    </script>
 
     <script>
         // Global variables
@@ -958,10 +1252,12 @@ require_once '../include/new-academai-sidebar.php';
         // Event listeners
         document.getElementById('addRowBtn').addEventListener('click', addRow);
         document.getElementById('addColumnBtn').addEventListener('click', addColumn);
-        document.getElementById('saveNewBtn').addEventListener('click', saveNewRubric);
+        // document.getElementById('saveNewBtn').addEventListener('click', saveNewRubric);
+        document.getElementById('saveNewBtn').addEventListener('click', saveNewRubricWithValidation);
         document.getElementById('updateRubricBtn').addEventListener('click', updateRubric);
         document.getElementById('viewRubricsBtn').addEventListener('click', loadRubricsList);
-        document.getElementById('confirmSaveBtn').addEventListener('click', confirmSaveRubric);
+        // document.getElementById('confirmSaveBtn').addEventListener('click', confirmSaveRubric);
+        document.getElementById('confirmSaveBtn').addEventListener('click', confirmSaveRubricWithValidation);
 
         // Modal close buttons
         document.getElementById('closeSaveModal').addEventListener('click', function () {
