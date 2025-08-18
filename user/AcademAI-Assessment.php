@@ -914,29 +914,33 @@ $question_number = $_GET['question_number'] ?? 'Unknown';
                 <!-- AI Report Section -->
                 <div id="ai-report" class="content-section">
                     <div class="assessment">
-                        <?php if (isset($parsedEvaluation["ai_detection"]) && !empty($parsedEvaluation["ai_detection"])): ?>
+                        <?php if (!empty($evaluations)): ?>
                             <div class="assessment-details-ai">
                                 <p class="rubrics-ai">AI Detection Analysis</p>
                                 <div class="ai-score-container">
                                     <div class="ai-score-chart">
                                         <div class="ai-meter">
                                             <?php
-                                            $ai_percentage = $parsedEvaluation["ai_detection"]["ai_probability"] ?? 0;
-                                            $human_percentage = $parsedEvaluation["ai_detection"]["human_probability"] ?? 0;
+                                            // Get AI probabilities from database columns (stored as decimals)
+                                            $ai_decimal = floatval($evaluations[0]['ai_probability'] ?? 0);
+                                            $human_decimal = floatval($evaluations[0]['human_probability'] ?? 0);
 
-                                            // Normalize to 100% bar (ensures total width = 100%)
-                                            $total = $ai_percentage + $human_percentage;
-                                            $ai_width = $total > 0 ? ($ai_percentage / $total) * 100 : 0;
-                                            $human_width = 100 - $ai_width;
+                                            // Convert to percentages for display
+                                            $ai_percentage = $ai_decimal * 100;
+                                            $human_percentage = $human_decimal * 100;
+
+                                            // Use the percentages for bar width (they should already total 100%)
+                                            $ai_width = $ai_percentage;
+                                            $human_width = $human_percentage;
                                             ?>
 
-                                            <div class="ai-portion" style="width: <?php echo $ai_width; ?>%;">
+                                            <div class="ai-portion" style="width: 100%;">
                                                 <span class="ai-label">AI:
-                                                    <?php echo number_format($ai_width, 2); ?>%</span>
+                                                    <?php echo number_format($ai_percentage, 0); ?>%</span>
                                             </div>
-                                            <div class="human-portion" style="width: <?php echo $human_width; ?>%;">
+                                            <div class="human-portion" style="width: 100%;">
                                                 <span class="human-label">Human:
-                                                    <?php echo number_format($human_width, 2); ?>%</span>
+                                                    <?php echo number_format($human_percentage, 0); ?>%</span>
                                             </div>
                                         </div>
 

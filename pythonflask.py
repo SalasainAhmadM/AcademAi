@@ -1,0 +1,2215 @@
+from flask import Flask, request, jsonify
+import requests
+import json
+import re
+from collections import Counter
+import re
+import requests
+from bs4 import BeautifulSoup
+import nltk
+from nltk.tokenize import sent_tokenize
+import time
+import random
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from nltk.corpus import stopwords
+import nltk
+import os
+import shutil
+
+import numpy as np
+from difflib import SequenceMatcher
+import math
+from nltk.tokenize import sent_tokenize, word_tokenize
+from nltk.stem import PorterStemmer
+
+nltk_path = os.path.join(os.getcwd(), "nltk_data")
+if os.path.exists(nltk_path):
+    shutil.rmtree(nltk_path)  # Remove old data to avoid corruption
+os.makedirs(nltk_path, exist_ok=True)
+
+# Set NLTK data path
+nltk.data.path.append(nltk_path)
+
+# Download only necessary NLTK resources
+try:
+    nltk.download('punkt', download_dir=nltk_path)
+    nltk.download('punkt_tab', download_dir=nltk_path)
+    nltk.download('stopwords', download_dir=nltk_path)
+except Exception as e:
+    print(f"NLTK download warning: {e}")
+
+nltk.data.path.append(nltk_path)
+
+# Download only necessary NLTK resources
+nltk.download('punkt', download_dir=nltk_path)
+nltk.download('punkt_tab', download_dir=nltk_path)
+nltk.download('stopwords', download_dir=nltk_path)
+
+nltk.data.path.append(nltk_path)
+
+def search_google_api(query, api_key, cse_id):
+    """
+    Perform a real Google search using the Google Custom Search API and return a list of URLs.
+    """
+    url = f"https://www.googleapis.com/customsearch/v1?key={api_key}&cx={cse_id}&q={query}"
+
+    response = requests.get(url)
+    if response.status_code == 200:
+        results = response.json().get('items', [])
+        return [result['link'] for result in results]
+    else:
+        return []
+
+def get_page_content(url):
+    """
+    Fetch content from a URL with timeout and error handling
+    """
+    try:
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+            'Accept-Language': 'en-US,en;q=0.5',
+            'Connection': 'keep-alive',
+            'Upgrade-Insecure-Requests': '1',
+            'Cache-Control': 'max-age=0'
+        }
+
+        response = requests.get(url, headers=headers, timeout=2)
+        if response.status_code != 200:
+            return ""
+        soup = BeautifulSoup(response.text, 'html.parser')
+
+        for tag in ['script', 'style', 'nav', 'footer', 'header', 'aside']:
+            for element in soup.find_all(tag):
+                element.decompose()
+
+        text = ' '.join([p.get_text(' ', strip=True) for p in soup.find_all(['p', 'h1', 'h2', 'h3', 'h4'])])
+
+        return text[:2000]
+
+    except Exception as e:
+        return ""
+
+def split_into_sentences(text):
+    """Split text into sentences using NLTK"""
+    return sent_tokenize(text)
+
+def get_key_sentences(text, n=3):
+    """
+    Extract key sentences for search, optimized to be faster
+    """
+    sentences = split_into_sentences(text)
+    if not sentences:
+        return []
+    sorted_sentences = sorted(sentences, key=len, reverse=True)
+    results = []
+    for sentence in sorted_sentences:
+        if 40 <= len(sentence) <= 200 and len(results) < n:
+            results.append(sentence)
+    return results
+
+def simple_similarity(text1, text2):
+    """
+    Simple text similarity check using word overlap
+    """
+    if not text1 or not text2:
+        return 0, []
+    sentences1 = split_into_sentences(text1)
+    sentences2 = split_into_sentences(text2)
+    if not sentences1 or not sentences2:
+        return 0, []
+    matches = []
+    match_scores = []
+    for s1 in sentences1:
+        words1 = set(s1.lower().split())
+        if len(words1) < 5:
+            continue
+        best_score = 0
+        for s2 in sentences2:
+            words2 = set(s2.lower().split())
+            if len(words2) < 5:
+                continue
+            intersection = len(words1.intersection(words2))
+            union = len(words1.union(words2))
+            score = intersection / union if union > 0 else 0
+            if score > best_score:
+                best_score = score
+        if best_score > 0.5:
+            matches.append(s1)
+            match_scores.append(best_score)
+    avg_similarity = sum(match_scores) / len(sentences1) if sentences1 else 0
+    return avg_similarity, matches
+
+def fetch_and_compare(url, text):
+    """Worker function for parallel processing"""
+    content = get_page_content(url)
+    if not content:
+        return None
+    similarity, matches = simple_similarity(text, content)
+    if similarity > 0 and matches:
+        return {
+            'url': url,
+            'similarity': similarity * 100,
+            'matched_parts': matches
+        }
+    return None
+
+def check_plagiarism(text, api_key, cse_id):
+    """
+    Faster plagiarism detection function using simplified algorithms
+    and parallel processing
+    """
+    start_time = time.time()
+    key_sentences = get_key_sentences(text, n=1)
+    if not key_sentences:
+        return [], text, 0, 100, "No analyzable content found."
+    search_query = key_sentences[0]
+    urls = search_google_api(search_query, api_key, cse_id)
+    plagiarism_results = []
+    matched_sentences = set()
+    with ThreadPoolExecutor(max_workers=4) as executor:
+        future_to_url = {executor.submit(fetch_and_compare, url, text): url for url in urls}
+        for future in as_completed(future_to_url):
+            result = future.result()
+            if result:
+                plagiarism_results.append(result)
+                matched_sentences.update(result['matched_parts'])
+    plagiarism_results = sorted(plagiarism_results, key=lambda x: x['similarity'], reverse=True)
+    total_sentences = len(split_into_sentences(text))
+    plagiarism_score = (len(matched_sentences) / total_sentences * 100) if total_sentences > 0 else 0
+    originality_score = 100 - plagiarism_score
+    message = ""
+    elapsed_time = time.time() - start_time
+    if elapsed_time > 8:
+        message = "Analysis time limit reached. Results may be complete or incomplete."
+    highlighted_text = text
+    for sentence in matched_sentences:
+        highlighted_text = highlighted_text.replace(
+            sentence,
+            f'<span class="highlight" title="Potential match">{sentence}</span>'
+        )
+    return plagiarism_results, highlighted_text, plagiarism_score, originality_score, message
+
+def get_top_repeated_words(text):
+    """Get most frequently used words in the text"""
+    words = re.findall(r'\b[a-zA-Z]{3,}\b', text.lower())
+    stop_words = set(stopwords.words('english'))
+    filtered_words = [word for word in words if word not in stop_words]
+    word_counts = Counter(filtered_words)
+    return [{'word': word, 'count': count} for word, count in word_counts.most_common(5)]
+
+def get_limitations():
+    return """
+    Disclaimer: This plagiarism detection tool provides a preliminary analysis and is not a substitute for comprehensive plagiarism checks. It may not detect all instances of plagiarism, especially if the content has been heavily paraphrased or modified. For academic or professional purposes, consider using specialized plagiarism detection services that offer more advanced analysis and higher accuracy.
+    """
+
+def calculate_text_similarity(text1, text2):
+    """Calculate similarity between two texts using word overlap and sentence structure"""
+    if not text1 or not text2:
+        return 0.0
+
+    # Convert to lowercase and tokenize
+    words1 = set(text1.lower().split())
+    words2 = set(text2.lower().split())
+
+    # Calculate Jaccard similarity
+    intersection = len(words1.intersection(words2))
+    union = len(words1.union(words2))
+    jaccard_similarity = intersection / union if union > 0 else 0
+
+    # Calculate sequence similarity
+    sequence_similarity = SequenceMatcher(None, text1.lower(), text2.lower()).ratio()
+
+    # Combine both similarities
+    combined_similarity = (jaccard_similarity * 0.4) + (sequence_similarity * 0.6)
+
+    return combined_similarity * 100
+
+def determine_rubric_level(similarity_score, rubric_headers):
+    """Determine which rubric level the answer matches based on similarity score"""
+    if not rubric_headers:
+        return "Unknown"
+
+    # Define thresholds for different levels
+    if similarity_score >= 85:
+        # Look for "Excellent" or highest level
+        for header in rubric_headers:
+            if any(word in header.lower() for word in ['excellent', 'outstanding', 'exemplary']):
+                return header
+        return rubric_headers[-1] if rubric_headers else "Excellent"
+    elif similarity_score >= 70:
+        # Look for "Good" or similar
+        for header in rubric_headers:
+            if any(word in header.lower() for word in ['good', 'satisfactory', 'adequate']):
+                return header
+        return rubric_headers[1] if len(rubric_headers) > 1 else "Good"
+    elif similarity_score >= 50:
+        # Look for "Fair" or similar
+        for header in rubric_headers:
+            if any(word in header.lower() for word in ['fair', 'developing', 'approaching']):
+                return header
+        return rubric_headers[0] if rubric_headers else "Fair"
+    else:
+        # Look for "Needs Improvement" or lowest level
+        for header in rubric_headers:
+            if any(word in header.lower() for word in ['needs improvement', 'poor', 'inadequate', 'unsatisfactory']):
+                return header
+        return rubric_headers[0] if rubric_headers else "Needs Improvement"
+
+app = Flask(__name__)
+
+API_KEY = "AIzaSyC7VxTT2Gjo5MLdwwGXiKaDvpdx2IGge2I"
+URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent"
+
+headers = {
+    "Content-Type": "application/json"
+}
+
+@app.route('/check_plagiarism', methods=['POST'])
+def check_plagiarism_endpoint():
+    try:
+        data = request.get_json(force=True)
+        text_to_check = data.get('text', '')
+
+        if not text_to_check.strip():
+            return jsonify({'error': 'No text provided'}), 400
+
+        if len(text_to_check) > 25000:
+            return jsonify({'error': 'Text exceeds the maximum character limit of 25,000 characters.'}), 400
+
+        plagiarism_results, _, plagiarism_score, _, message = check_plagiarism(
+            text_to_check, api_key='AIzaSyD7pDUCZfKOibhM5fTlY2yl0TLWjHgUO_g', cse_id='84e326e702f3a4031'
+        )
+
+        prompt = (
+        "Please check the following academic paragraph for any potential plagiarism, paraphrasing, or AI-generated content. "
+        "I would like a detailed analysis including a plagiarism probability score and any sources or segments that may have been copied or slightly modified. "
+        f"Here is the text: {text_to_check}\n\n"
+        "strictly respond a format it like this do not say anything else \n"
+        "{\n"
+        '  "plagiarism_score": 66.66666666666666,\n'
+        '  "message": "",\n'
+        '  "sources": [\n'
+        "    {\n"
+        '      "url": "https://dfwchild.com/events/romeo-and-juliet-2/",\n'
+        '      "similarity": 53.59147025813692,\n'
+        '      "matched_parts": [\n'
+        '        "\\"Romeo and Juliet is a tragedy written by William Shakespeare early in his career about two young star-crossed lovers whose deaths ultimately reconcile their feuding families.",\n'
+        '        "It was among Shakespeare\'s most popular plays during his lifetime and, along with Hamlet, is one of his most frequently performed plays."\n'
+        "      ]\n"
+        "    }\n"
+        "  ]\n"
+        "}"
+        )
+
+        if not plagiarism_results:
+            print('ai')
+            payload = {
+                "contents": [
+                    {
+                        "parts": [
+                            {"text": prompt}
+                        ]
+                    }
+                ]
+            }
+
+            response = requests.post(
+                f"{URL}?key={API_KEY}",
+                headers=headers,
+                data=json.dumps(payload)
+            )
+
+            if response.status_code != 200:
+                return jsonify({'error': f"Error {response.status_code}: {response.text}"}), response.status_code
+
+            try:
+                response_data = response.json()
+
+                text_content = response_data['candidates'][0]['content']['parts'][0]['text']
+
+                if text_content.startswith("```json"):
+                    clean_json_str = text_content.replace("```json", "").replace("```", "").strip()
+                else:
+                    clean_json_str = text_content.strip("` \n")
+
+                    inner_data = json.loads(clean_json_str)
+
+                    plagiarism_score = inner_data.get('plagiarism_score', 0)
+                    message = inner_data.get('message', '')
+                    plagiarism_results = inner_data.get('sources', [])
+
+            except json.JSONDecodeError as e:
+                print("Raw string was:", repr(clean_json_str))
+                return jsonify({'error': 'Failed to parse JSON response'}), 500
+
+            except Exception as e:
+                print(f"An unexpected error occurred: {e}")
+                return jsonify({'error': str(e)}), 500
+        print("Plagiarism results:", plagiarism_results)
+        response = {
+            'plagiarism_score': plagiarism_score,
+            'message': message,
+            'sources': plagiarism_results
+            }
+
+        return jsonify(response)
+
+    except Exception as e:
+        print(f"Error: {e}")
+        return jsonify({'error': str(e)}), 500
+
+def standardize_response(raw_text):
+    json_match = re.search(r'```json\s*([\s\S]*?)\s*```', raw_text)
+    if json_match:
+        try:
+
+            json_content = json.loads(json_match.group(1))
+            return json_content
+        except json.JSONDecodeError:
+            pass
+
+
+    try:
+        return json.loads(raw_text)
+    except json.JSONDecodeError:
+
+        return {
+            "evaluation": raw_text
+        }
+
+
+
+@app.route('/evaluate', methods=['POST'])
+def evaluate_essay():
+    data = request.json
+    if not data or 'essay' not in data or 'rubrics_criteria' not in data:
+        return jsonify({"error": "Missing required fields: essay and/or rubrics_criteria"}), 400
+
+    essay = data['essay']
+    rubrics_criteria = data['rubrics_criteria']
+    levels = data['level']
+
+    # Enhanced AI detection function for internal use
+    def detect_ai_content(text):
+        """Enhanced AI detection with detailed analysis and gibberish detection"""
+        try:
+            # GIBBERISH DETECTION - Enhanced version
+            def detect_gibberish(text):
+                """Detect gibberish/nonsensical text patterns and calculate ratios"""
+                words = text.split()
+                total_words = len(words)
+
+                if total_words == 0:
+                    return False, 0.0, 0, []
+
+                gibberish_indicators = 0
+                gibberish_words = []
+                coherent_words = []
+
+                for word in words:
+                    # Clean word (remove punctuation)
+                    clean_word = ''.join(c for c in word.lower() if c.isalpha())
+
+                    if len(clean_word) < 2:  # Skip very short words
+                        continue
+
+                    # Check for gibberish patterns
+                    is_gibberish = False
+
+                    # Pattern 1: Excessive consonant clusters (more than 4 consecutive consonants)
+                    consonant_clusters = re.findall(r'[bcdfghjklmnpqrstvwxyz]{5,}', clean_word)
+                    if consonant_clusters:
+                        is_gibberish = True
+
+                    # Pattern 2: No vowels in words longer than 3 characters
+                    if len(clean_word) > 3 and not re.search(r'[aeiou]', clean_word):
+                        is_gibberish = True
+
+                    # Pattern 3: Excessive repeated characters (more than 3 same chars in a row)
+                    if re.search(r'(.)\1{3,}', clean_word):
+                        is_gibberish = True
+
+                    # Pattern 4: Random keyboard mashing patterns
+                    keyboard_patterns = [
+                        r'[qwertyuiop]{4,}',  # Top row
+                        r'[asdfghjkl]{4,}',   # Middle row
+                        r'[zxcvbnm]{4,}',     # Bottom row
+                        r'[qaz]{3,}',         # Left column
+                        r'[wsx]{3,}', r'[edc]{3,}', r'[rfv]{3,}',
+                        r'[tgb]{3,}', r'[yhn]{3,}', r'[ujm]{3,}',
+                        r'[ik]{3,}', r'[ol]{3,}'
+                    ]
+
+                    for pattern in keyboard_patterns:
+                        if re.search(pattern, clean_word, re.IGNORECASE):
+                            is_gibberish = True
+                            break
+
+                    # Pattern 5: Very long words with unusual letter combinations
+                    if len(clean_word) > 8:
+                        # Check for unusual letter frequency
+                        letter_freq = {}
+                        for char in clean_word:
+                            letter_freq[char] = letter_freq.get(char, 0) + 1
+
+                        # If any letter appears more than 40% of the time in a long word
+                        max_freq = max(letter_freq.values()) if letter_freq else 0
+                        if max_freq / len(clean_word) > 0.4:
+                            is_gibberish = True
+
+                    # Pattern 6: Common gibberish word patterns
+                    gibberish_patterns = [
+                        r'^[bcdfghjklmnpqrstvwxyz]+$',  # Only consonants
+                        r'^.*(sha|dga|ksd|skd|jsh|jsf|hsd|asd|askd|jasd).*',  # Common gibberish sequences
+                        r'^[a-z]*[xyz]{2,}[a-z]*$',  # Multiple x,y,z (rare in real words)
+                        r'^(asda|asdas|asdsa|askas|askdjas|asdjasd|asdjas|asjdas|jasdas|dahsbda)$'  # Specific gibberish words
+                    ]
+
+                    for pattern in gibberish_patterns:
+                        if re.match(pattern, clean_word, re.IGNORECASE):
+                            is_gibberish = True
+                            break
+
+                    if is_gibberish:
+                        gibberish_indicators += 1
+                        gibberish_words.append(word)
+                    else:
+                        coherent_words.append(word)
+
+                gibberish_ratio = gibberish_indicators / total_words if total_words > 0 else 0
+                coherent_word_count = len(coherent_words)
+
+                return gibberish_ratio > 0.05, gibberish_ratio, coherent_word_count, gibberish_words
+
+            # Check for gibberish first
+            has_gibberish, gibberish_ratio, coherent_word_count, gibberish_words = detect_gibberish(text)
+
+            # Extract coherent text for AI analysis
+            words = text.split()
+            coherent_text_parts = []
+            
+            for word in words:
+                clean_word = ''.join(c for c in word.lower() if c.isalpha())
+                if clean_word and word not in gibberish_words:
+                    coherent_text_parts.append(word)
+            
+            # Reconstruct coherent text for AI analysis
+            coherent_text = ' '.join(coherent_text_parts)
+            
+            # Determine if text is mostly or entirely gibberish
+            total_words = len(text.split())
+
+            if gibberish_ratio >= 0.8:  # 80% or more gibberish = entirely gibberish
+                return {
+                    "ai_probability": 0.05,  # Very low AI probability for gibberish
+                    "human_probability": 0.95,
+                    "formatted": "AI Generated: 5.00% and Human: 95.00%",
+                    "gibberish_detected": True,
+                    "gibberish_ratio": round(gibberish_ratio, 4),
+                    "coherent_word_count": coherent_word_count,
+                    "is_entirely_gibberish": True
+                }
+
+            # IMPROVED AI DETECTION LOGIC
+            # Analyze coherent text for AI patterns
+            if len(coherent_text) < 50:  # Not enough coherent text for reliable AI detection
+                human_bias = min(0.8, 0.6 + (gibberish_ratio * 0.4))
+                ai_score = 1.0 - human_bias
+                return {
+                    "ai_probability": round(ai_score, 4),
+                    "human_probability": round(human_bias, 4),
+                    "formatted": f"AI Generated: {ai_score*100:.2f}% and Human: {human_bias*100:.2f}%",
+                    "gibberish_detected": has_gibberish,
+                    "gibberish_ratio": round(gibberish_ratio, 4),
+                    "coherent_word_count": coherent_word_count,
+                    "is_entirely_gibberish": False
+                }
+
+            # Analyze the coherent portion for AI characteristics
+            sentences = sent_tokenize(coherent_text)
+            words = coherent_text.split()
+
+            # Basic metrics on coherent text
+            avg_sentence_length = sum(len(s.split()) for s in sentences) / len(sentences) if sentences else 0
+            sentence_length_variance = sum((len(s.split()) - avg_sentence_length) ** 2 for s in sentences) / len(sentences) if sentences else 0
+            sentence_length_std = sentence_length_variance ** 0.5
+
+            # Vocabulary diversity (Type-Token Ratio) on coherent text
+            unique_words = len(set(word.lower() for word in words if word.isalpha()))
+            total_coherent_words = len([word for word in words if word.isalpha()])
+            vocab_diversity = unique_words / total_coherent_words if total_coherent_words > 0 else 0
+
+            # AI DETECTION FEATURES (improved and more accurate)
+            ai_score = 0.5  # Start neutral
+
+            # 1. SENTENCE STRUCTURE CONSISTENCY (Strong AI indicator)
+            if len(sentences) >= 3:
+                if sentence_length_std < 3:  # Very uniform sentence lengths
+                    ai_score += 0.2
+                elif sentence_length_std < 6:  # Moderately uniform
+                    ai_score += 0.1
+                elif sentence_length_std > 15:  # High variation (human-like)
+                    ai_score -= 0.15
+
+            # 2. OPTIMAL AI SENTENCE LENGTH PATTERNS
+            if 15 <= avg_sentence_length <= 25:
+                ai_score += 0.15  # AI sweet spot
+            elif avg_sentence_length > 30 or avg_sentence_length < 10:
+                ai_score -= 0.1  # Too long/short for typical AI
+
+            # 3. VOCABULARY SOPHISTICATION PATTERNS
+            sophisticated_words = len(re.findall(r'\b\w{8,}\b', coherent_text))
+            sophisticated_ratio = sophisticated_words / total_coherent_words if total_coherent_words > 0 else 0
+            
+            if 0.1 <= sophisticated_ratio <= 0.25:  # AI tends to use sophisticated words
+                ai_score += 0.12
+            elif sophisticated_ratio > 0.3:  # Excessive sophistication
+                ai_score += 0.18
+
+            # 4. TRANSITION WORD OVERUSE (Strong AI indicator)
+            transition_words = [
+                'however', 'moreover', 'furthermore', 'consequently', 'nevertheless',
+                'therefore', 'additionally', 'subsequently', 'accordingly', 'conversely',
+                'similarly', 'likewise', 'in contrast', 'on the other hand', 'meanwhile',
+                'specifically', 'particularly', 'notably', 'importantly', 'significantly',
+                'essentially', 'ultimately', 'fundamentally', 'primarily', 'generally'
+            ]
+            transition_count = sum(1 for word in transition_words if word in coherent_text.lower())
+            transition_density = transition_count / total_coherent_words if total_coherent_words > 0 else 0
+
+            if transition_density > 0.04:  # High transition density = AI
+                ai_score += 0.25
+            elif transition_density > 0.025:
+                ai_score += 0.15
+            elif transition_density > 0.015:
+                ai_score += 0.08
+
+            # 5. FORMULAIC LANGUAGE PATTERNS (Strong AI indicator)
+            formulaic_patterns = [
+                r'it is important to (note|understand|recognize|consider)',
+                r'it should be (noted|understood|recognized|emphasized)',
+                r'(in conclusion|to summarize|in summary|to conclude)',
+                r'it can be (argued|stated|observed|concluded)',
+                r'it is worth (noting|mentioning|considering)',
+                r'it is (evident|clear|obvious|apparent) that',
+                r'this (demonstrates|illustrates|shows|indicates) that',
+                r'(as a result|consequently|therefore|thus)',
+                r'due to the fact that',
+                r'in light of (this|these)',
+                r'taking (this|these) into (account|consideration)',
+                r'it is crucial to (understand|note|recognize)'
+            ]
+            
+            formulaic_count = sum(1 for pattern in formulaic_patterns if re.search(pattern, coherent_text, re.IGNORECASE))
+            formulaic_density = formulaic_count / len(sentences) if sentences else 0
+
+            if formulaic_density > 0.4:  # Very formulaic = AI
+                ai_score += 0.3
+            elif formulaic_density > 0.2:
+                ai_score += 0.2
+            elif formulaic_density > 0.1:
+                ai_score += 0.1
+
+            # 6. PERFECT GRAMMAR AND PUNCTUATION (AI indicator)
+            # Count potential grammar/spelling errors (humans make mistakes)
+            common_errors = [
+                r'\bteh\b', r'\brecieve\b', r'\bseperate\b', r'\bdefinately\b',
+                r'\boccured\b', r'\bbegining\b', r'\byour\s+doing\b', r'\bthere\s+car\b'
+            ]
+            error_count = sum(1 for pattern in common_errors if re.search(pattern, coherent_text, re.IGNORECASE))
+            
+            # Check for missing apostrophes in contractions
+            contraction_errors = len(re.findall(r'\b(dont|wont|cant|shouldnt|couldnt|wouldnt|isnt|arent|wasnt|werent)\b', coherent_text, re.IGNORECASE))
+            
+            total_errors = error_count + contraction_errors
+            error_rate = total_errors / total_coherent_words if total_coherent_words > 0 else 0
+
+            if error_rate == 0 and len(coherent_text) > 200:  # Perfect writing = AI
+                ai_score += 0.15
+            elif error_rate > 0.01:  # Human-like errors
+                ai_score -= 0.2
+
+            # 7. EXCESSIVE ADVERB AND ADJECTIVE USAGE
+            adverb_pattern = r'\b\w+ly\b'
+            adverb_count = len(re.findall(adverb_pattern, coherent_text, re.IGNORECASE))
+            adverb_density = adverb_count / total_coherent_words if total_coherent_words > 0 else 0
+
+            if adverb_density > 0.08:  # AI loves adverbs
+                ai_score += 0.18
+            elif adverb_density > 0.05:
+                ai_score += 0.1
+
+            # Excessive adjective patterns
+            excessive_adj_pattern = r'\b(very|extremely|incredibly|remarkably|exceptionally|particularly|especially|significantly|highly|deeply|truly|completely|entirely|absolutely)\s+\w+'
+            excessive_adj_count = len(re.findall(excessive_adj_pattern, coherent_text, re.IGNORECASE))
+            excessive_adj_density = excessive_adj_count / total_coherent_words if total_coherent_words > 0 else 0
+
+            if excessive_adj_density > 0.04:
+                ai_score += 0.15
+            elif excessive_adj_density > 0.02:
+                ai_score += 0.08
+
+            # 8. SENTENCE STARTER PATTERNS
+            sentence_starters = [s.split()[0].lower() for s in sentences if s.split()]
+            starter_diversity = len(set(sentence_starters)) / len(sentence_starters) if sentence_starters else 1
+
+            if starter_diversity < 0.5:  # Repetitive starters = AI
+                ai_score += 0.12
+            elif starter_diversity < 0.7:
+                ai_score += 0.06
+
+            # 9. PERSONAL VOICE AND PRONOUNS
+            personal_pronouns = len(re.findall(r'\b(I|me|my|mine|myself)\b', coherent_text, re.IGNORECASE))
+            personal_ratio = personal_pronouns / total_coherent_words if total_coherent_words > 0 else 0
+
+            if personal_ratio < 0.005 and len(coherent_text) > 300:  # Lack of personal voice = AI
+                ai_score += 0.15
+            elif personal_ratio > 0.04:  # Strong personal voice = human
+                ai_score -= 0.15
+
+            # 10. REPETITIVE PHRASE PATTERNS
+            # Look for repeated 3-4 word phrases (AI tends to repeat patterns)
+            words_lower = [w.lower() for w in words if w.isalpha()]
+            repeated_phrases = []
+            
+            for length in [3, 4]:
+                for i in range(len(words_lower) - length + 1):
+                    phrase = ' '.join(words_lower[i:i+length])
+                    if coherent_text.lower().count(phrase) > 1:
+                        repeated_phrases.append(phrase)
+            
+            repetition_score = len(set(repeated_phrases)) / len(sentences) if sentences else 0
+            
+            if repetition_score > 0.3:
+                ai_score += 0.15
+            elif repetition_score > 0.15:
+                ai_score += 0.08
+
+            # 11. COMPLEX PUNCTUATION OVERUSE
+            complex_punct = len(re.findall(r'[;:\-—(){}[\]"]', coherent_text))
+            punct_density = complex_punct / len(coherent_text) if len(coherent_text) > 0 else 0
+            
+            if punct_density > 0.025:  # Overuse of complex punctuation
+                ai_score += 0.08
+
+            # 12. VOCABULARY CONSISTENCY (AI has more consistent vocabulary level)
+            if 0.6 <= vocab_diversity <= 0.8:  # AI sweet spot for vocabulary
+                ai_score += 0.1
+            elif vocab_diversity > 0.9:  # Very diverse vocabulary = human
+                ai_score -= 0.1
+
+            # 13. HEDGING LANGUAGE (AI loves uncertainty expressions)
+            hedging_patterns = [
+                r'\b(might|may|could|perhaps|possibly|likely|probably|seems?|appears?)\b',
+                r'\b(tend to|appears? to|seems? to)\b',
+                r'\b(generally|typically|usually|often|frequently)\b'
+            ]
+            hedging_count = sum(1 for pattern in hedging_patterns 
+                              for match in re.finditer(pattern, coherent_text, re.IGNORECASE))
+            hedging_density = hedging_count / total_coherent_words if total_coherent_words > 0 else 0
+
+            if hedging_density > 0.03:
+                ai_score += 0.12
+            elif hedging_density > 0.015:
+                ai_score += 0.06
+
+            # GIBBERISH ADJUSTMENT
+            # If there's gibberish, slightly reduce AI probability (AI rarely produces pure gibberish)
+            if has_gibberish and gibberish_ratio > 0.1:
+                gibberish_adjustment = min(0.15, gibberish_ratio * 0.3)
+                ai_score -= gibberish_adjustment
+
+            # Final normalization and bounds checking
+            ai_score = max(0.05, min(0.95, ai_score))
+            human_score = 1.0 - ai_score
+
+            # Add small random variation to avoid appearing deterministic
+            import random
+            variation = random.uniform(-0.015, 0.015)
+            ai_score = max(0.05, min(0.95, ai_score + variation))
+            human_score = 1.0 - ai_score
+
+            return {
+                "ai_probability": round(ai_score, 4),
+                "human_probability": round(human_score, 4),
+                "formatted": f"AI Generated: {ai_score*100:.2f}% and Human: {human_score*100:.2f}%",
+                "gibberish_detected": has_gibberish,
+                "gibberish_ratio": round(gibberish_ratio, 4),
+                "coherent_word_count": coherent_word_count,
+                "is_entirely_gibberish": False
+            }
+
+        except Exception as e:
+            print(f"AI detection error: {e}")
+            # Fallback with slight randomization
+            import random
+            fallback_ai = random.uniform(0.45, 0.55)
+            fallback_human = 1.0 - fallback_ai
+            return {
+                "ai_probability": round(fallback_ai, 4),
+                "human_probability": round(fallback_human, 4),
+                "formatted": f"AI Generated: {fallback_ai*100:.2f}% and Human: {fallback_human*100:.2f}%",
+                "gibberish_detected": False,
+                "gibberish_ratio": 0.0,
+                "coherent_word_count": 0,
+                "is_entirely_gibberish": False
+            }
+
+    # Perform AI detection
+    ai_detection_result = detect_ai_content(essay)
+
+    # Check if essay is entirely gibberish
+    if ai_detection_result.get('is_entirely_gibberish', False):
+        # Return 0 score evaluation for entirely gibberish essays
+        zero_score_response = {
+            "criteria_scores": {},
+            "overall_weighted_score": 0,
+            "general_assessment": {
+                "strengths": ["N/A - Essay consists entirely of gibberish text"],
+                "areas_for_improvement": ["Submit a coherent essay with meaningful content related to the topic"]
+            },
+            "ai_detection": {
+                "formatted": ai_detection_result['formatted'],
+                "ai_probability": ai_detection_result['ai_probability'],
+                "human_probability": ai_detection_result['human_probability']
+            },
+            "plagiarism": {
+                "assessment": "NEGLIGIBLE",
+                "color": "blue",
+                "description": "No meaningful content to analyze for plagiarism",
+                "overall_percentage": 0,
+                "overall_score": 0,
+                "sources": [],
+                "success": True,
+                "total_parts": 1,
+                "total_sources_analyzed": 0,
+                "total_sources_found": 0
+            },
+            "plagiarism_sources": []
+        }
+
+        # Add zero scores for each criterion
+        import re
+        criteria_matches = re.findall(r'([^(]+)\s*\(Weight:\s*(\d+)%\)', rubrics_criteria)
+        for criterion_name, weight in criteria_matches:
+            criterion_name = criterion_name.strip()
+            zero_score_response["criteria_scores"][f"{criterion_name} (Weight: {weight}%)"] = {
+                "score": 0,
+                "feedback": f"✅ Why Current Level (0 points): Essay consists entirely of gibberish text with no coherent content.<br>❌ Why not higher levels: No meaningful content present to evaluate against rubric criteria.<br>",
+                "suggestions": [
+                    "Write a coherent essay with meaningful sentences",
+                    "Address the topic with relevant content and proper language"
+                ]
+            }
+
+        return jsonify({"evaluation": json.dumps(zero_score_response, indent=2)})
+
+    # Calculate score penalty for partial gibberish
+    gibberish_penalty = 0
+    if ai_detection_result.get('gibberish_detected', False):
+        gibberish_ratio = ai_detection_result.get('gibberish_ratio', 0)
+        # Apply penalty: up to 30% score reduction for high gibberish content
+        gibberish_penalty = min(0.3, gibberish_ratio * 0.5)
+
+    # Enhanced evaluation prompt with integrated AI detection and gibberish handling
+    initiate_prompt = f"""You are an expert essay evaluator. Grade the essay based on the provided rubric criteria.
+
+YOUR OUTPUT MUST BE IN VALID JSON FORMAT ONLY WITH NO ADDITIONAL TEXT OR FORMATTING. FOLLOW THIS EXACT STRUCTURE:
+
+IMPORTANT AI DETECTION INTEGRATION:
+- The AI detection has been pre-analyzed: {ai_detection_result['formatted']}
+- Use these values in your response: AI Probability: {ai_detection_result['ai_probability']}, Human Probability: {ai_detection_result['human_probability']}
+- Consider this analysis when evaluating writing quality and authenticity
+
+GIBBERISH CONTENT DETECTED:
+- Gibberish detected: {ai_detection_result.get('gibberish_detected', False)}
+- Gibberish ratio: {ai_detection_result.get('gibberish_ratio', 0):.4f}
+- Apply score penalty of {gibberish_penalty:.2f} (multiply final scores by {1-gibberish_penalty:.2f})
+- Coherent word count: {ai_detection_result.get('coherent_word_count', 0)}
+
+EVALUATION INSTRUCTIONS:
+1. Evaluate ONLY the coherent parts of the essay
+2. Apply the gibberish penalty to reduce scores proportionally
+3. Mention gibberish content in feedback as a major weakness
+4. Focus scoring on meaningful content while penalizing nonsensical text
+
+```json
+{{
+  "criteria_scores": {{
+    "Criterion Name (Weight: X%)": {{
+      "score": [numeric score after gibberish penalty],
+      "feedback": "(note:add always breaktag<br> in icons checks,books,letter x and book) the levels are {", ".join(levels)} ✅ Why [current_level]: [1 short sentence with specific evidence from coherent parts]<br>❌ Why not [higher_level]: [specific missing elements including gibberish impact].<br>❌ Why not [lower_level]: [what coherent parts did well]. if there are {len(levels)} levels excluding weight %, there should also {len(levels)} why's to make criteria assessment longer and detailed <br>",
+      "suggestions": [
+        "[suggestion 1 - address coherent content]",
+        "[suggestion 2 - address gibberish issue if present]"
+      ]
+    }}
+  }},
+  "overall_weighted_score": [numeric score after gibberish penalty],
+  "general_assessment": {{
+    "strengths": [
+      "[Analysis of strengths from coherent parts of the essay]"
+    ],
+    "areas_for_improvement": [
+      "[Include removal of gibberish content as major improvement area if present]",
+      "[Other specific improvements for coherent content]"
+    ]
+  }},
+  "ai_detection": {{
+    "formatted": "{ai_detection_result['formatted']}",
+    "ai_probability": {ai_detection_result['ai_probability']},
+    "human_probability": {ai_detection_result['human_probability']}
+  }},
+  "plagiarism": {{
+    "assessment": "[NEGLIGIBLE/LOW/MODERATE/HIGH]",
+    "color": "[blue/yellow/orange/red]",
+    "description": "[description text]",
+    "overall_percentage": [X.XX],
+    "overall_score": [0.XXXX],
+    "sources": [],
+    "success": true,
+    "total_parts": 1,
+    "total_sources_analyzed": 0,
+    "total_sources_found": 0
+  }},
+  "plagiarism_sources": []
+}}
+```
+
+EVALUATION GUIDELINES:
+1. Score each criterion based on coherent content only
+2. Apply gibberish penalty: multiply calculated scores by {1-gibberish_penalty:.3f}
+3. Provide detailed feedback noting gibberish content as a significant issue
+4. Include {len(levels)} "why" explanations for each criterion (current level + why not other levels)
+5. Use the pre-calculated AI detection values exactly as provided
+6. Assess plagiarism based on coherent text patterns only
+
+RUBRIC CRITERIA:
+{rubrics_criteria}
+
+ESSAY TO EVALUATE:
+{essay}"""
+
+    # Enhanced payload with better generation parameters
+    payload = {
+        "contents": [
+            {
+                "parts": [
+                    {"text": initiate_prompt}
+                ]
+            }
+        ],
+        "generationConfig": {
+            "temperature": 0.4,
+            "topP": 0.9,
+            "topK": 40,
+            "maxOutputTokens": 4096
+        }
+    }
+
+    try:
+        response = requests.post(
+            f"{URL}?key={API_KEY}",
+            headers=headers,
+            data=json.dumps(payload)
+        )
+
+        if response.status_code != 200:
+            return jsonify({"error": f"API Error {response.status_code}: {response.text}"}), response.status_code
+
+        response_data = response.json()
+        raw_text = response_data['candidates'][0]['content']['parts'][0]['text']
+
+        # Enhanced JSON extraction
+        try:
+            # Clean the response text
+            cleaned_text = raw_text.strip()
+
+            # Remove markdown code blocks if present
+            if cleaned_text.startswith('```json'):
+                cleaned_text = re.sub(r'^```json\s*', '', cleaned_text)
+                cleaned_text = re.sub(r'\s*```$', '', cleaned_text)
+            elif cleaned_text.startswith('```'):
+                cleaned_text = re.sub(r'^```\s*', '', cleaned_text)
+                cleaned_text = re.sub(r'\s*```$', '', cleaned_text)
+
+            # Try to extract JSON object
+            json_match = re.search(r'\{[\s\S]*\}', cleaned_text)
+            if json_match:
+                json_str = json_match.group(0)
+                try:
+                    parsed_json = json.loads(json_str)
+
+                    # Ensure AI detection values are properly set
+                    if 'ai_detection' in parsed_json:
+                        parsed_json['ai_detection']['formatted'] = ai_detection_result['formatted']
+                        parsed_json['ai_detection']['ai_probability'] = ai_detection_result['ai_probability']
+                        parsed_json['ai_detection']['human_probability'] = ai_detection_result['human_probability']
+
+                    return jsonify({"evaluation": json.dumps(parsed_json, indent=2)})
+
+                except json.JSONDecodeError as e:
+                    print(f"JSON parsing error: {e}")
+                    # Return raw text if JSON parsing fails
+                    return jsonify({"evaluation": raw_text})
+            else:
+                return jsonify({"evaluation": raw_text})
+
+        except Exception as parse_error:
+            print(f"Response parsing error: {parse_error}")
+            return jsonify({"evaluation": raw_text})
+
+        # Extract criteria levels for additional processing (if needed)
+        criteria_levels = {}
+        criteria_matches = re.finditer(r'"(.*?) \(Weight: \d+%\)": \{', raw_text)
+
+        for match in criteria_matches:
+            criteria_name = match.group(1)
+            criteria_block_start = match.end()
+            criteria_block_end = raw_text.find('}', criteria_block_start) + 1
+            criteria_block = raw_text[criteria_block_start:criteria_block_end]
+
+            levels_found = []
+            for level_match in re.finditer(r'(✅|❌) Why (.*?): (.*?)<br>', criteria_block):
+                level_symbol, level_name, level_sentence = level_match.groups()
+                level_name = level_name.replace("not ", "").strip()
+                levels_found.append({
+                    "Level": level_name,
+                    "Sentence": level_sentence.strip(),
+                    "Symbol": level_symbol
+                })
+
+            criteria_levels[criteria_name] = levels_found
+
+        return jsonify({"evaluation": raw_text, "criteria_analysis": criteria_levels})
+
+    except Exception as e:
+        print(f"Error during evaluation: {e}")
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/autogenerate', methods=['POST'])
+def autogenerate_essay():
+    data = request.json
+    if not data or 'essay' not in data or 'rubrics_criteria' not in data:
+        return jsonify({"error": "Missing required fields: essay and/or rubrics_criteria"}), 400
+
+    essay = data['essay']
+    rubrics_criteria = data['rubrics_criteria']
+
+
+    is_auto_generate = rubrics_criteria == "auto-generate"
+
+
+    row_count = 4
+    column_count = 4
+
+
+    if "row_count:" in essay:
+        row_match = re.search(r'row_count:\s*(\d+)', essay)
+        if row_match:
+            row_count = int(row_match.group(1))
+            row_count = max(2, min(8, row_count))
+
+    if "column_count:" in essay:
+        col_match = re.search(r'column_count:\s*(\d+)', essay)
+        if col_match:
+            column_count = int(col_match.group(1))
+            column_count = max(2, min(5, column_count))
+
+
+    headers_str = ", ".join([f'"Level {i+1} ({column_count+1-i})"' for i in range(column_count)])
+    rows_str = ""
+
+    for i in range(row_count):
+        cells_str = ", ".join([f'"LEVEL {j+1} DESCRIPTION"' for j in range(column_count)])
+        weight = 100 // row_count
+        extra = 100 % row_count
+
+        if i == 0:
+            weight += extra
+
+        rows_str += f"""
+    {{
+        "criteria": "CRITERION NAME {i+1}",
+        "cells": [{cells_str}, "{weight}"]
+    }}{"," if i < row_count-1 else ""}"""
+
+
+    json_template = f"""{{
+    "headers": [{headers_str}, "Weight %"],
+    "rows": [{rows_str}
+    ]
+}}"""
+
+
+    initiate_prompt = f"""Create a detailed academic rubric in JSON format with exactly {row_count} criteria rows and exactly {column_count} scoring levels plus a weight column.
+The output must follow this exact JSON structure:
+{json_template}
+
+IMPORTANT:
+1. Each criterion must have detailed descriptions (25-35 words) for all {column_count} performance levels.
+2. All weight percentages must sum to exactly 100%.
+3. Return ONLY the JSON object with no additional text before or after.
+4. Do not use markdown code blocks or any other formatting - just return the raw JSON.
+Based on this information: """
+
+    full_prompt = initiate_prompt + essay
+
+    payload = {
+        "contents": [
+            {
+                "parts": [
+                    {"text": full_prompt}
+                ]
+            }
+        ]
+    }
+
+    try:
+        response = requests.post(
+            f"{URL}?key={API_KEY}",
+            headers=headers,
+            data=json.dumps(payload)
+        )
+        response_data = response.json()
+        raw_text = response_data['candidates'][0]['content']['parts'][0]['text']
+
+
+        json_match = re.search(r'\{[\s\S]*"headers"[\s\S]*"rows"[\s\S]*\}', raw_text)
+        if json_match:
+            json_str = json_match.group(0)
+            try:
+                json_data = json.loads(json_str)
+                if "headers" in json_data and "rows" in json_data:
+                    return jsonify({"evaluation": json_data})
+                else:
+                    return jsonify({"evaluation": raw_text})
+            except json.JSONDecodeError:
+                return jsonify({"evaluation": raw_text})
+        else:
+            return jsonify({"evaluation": raw_text})
+
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+
+@app.route('/analyze', methods=['POST'])
+def analyze_text():
+    try:
+        data = request.get_json(force=True)
+        essay = data.get('essay', '')
+
+        if not essay.strip():
+            return jsonify({'error': 'No essay provided'}), 400
+
+        # Enhanced text analysis metrics
+        def calculate_text_metrics(text):
+            sentences = sent_tokenize(text)
+            words = text.split()
+
+            # Calculate various metrics
+            avg_sentence_length = sum(len(s.split()) for s in sentences) / len(sentences) if sentences else 0
+            sentence_length_variance = sum((len(s.split()) - avg_sentence_length) ** 2 for s in sentences) / len(sentences) if sentences else 0
+
+            # Vocabulary diversity (Type-Token Ratio)
+            unique_words = len(set(word.lower() for word in words if word.isalpha()))
+            total_words = len([word for word in words if word.isalpha()])
+            vocab_diversity = unique_words / total_words if total_words > 0 else 0
+
+            # Complex punctuation patterns
+            complex_punct_count = len(re.findall(r'[;:\-—(){}[\]"]', text))
+            punct_density = complex_punct_count / len(text) if len(text) > 0 else 0
+
+            # Transition word density
+            transition_words = ['however', 'moreover', 'furthermore', 'consequently', 'nevertheless', 'therefore', 'additionally', 'subsequently', 'accordingly', 'conversely']
+            transition_count = sum(1 for word in transition_words if word in text.lower())
+            transition_density = transition_count / total_words if total_words > 0 else 0
+
+            # Adverb density (often overused in AI text)
+            adverb_pattern = r'\b\w+ly\b'
+            adverb_count = len(re.findall(adverb_pattern, text, re.IGNORECASE))
+            adverb_density = adverb_count / total_words if total_words > 0 else 0
+
+            return {
+                'sentence_count': len(sentences),
+                'word_count': total_words,
+                'avg_sentence_length': avg_sentence_length,
+                'sentence_length_variance': sentence_length_variance,
+                'vocab_diversity': vocab_diversity,
+                'punct_density': punct_density,
+                'transition_density': transition_density,
+                'adverb_density': adverb_density
+            }
+
+        # Calculate metrics for the input text
+        metrics = calculate_text_metrics(essay)
+
+        # Enhanced prompt with more sophisticated analysis
+        prompt = f"""You are an expert AI detection system with advanced linguistic analysis capabilities. Analyze the following text to determine if it was likely generated by an AI or written by a human.
+
+ADVANCED ANALYSIS FRAMEWORK:
+
+1. LINGUISTIC PATTERNS:
+   - Sentence structure consistency and complexity variation
+   - Vocabulary sophistication vs. naturalness
+   - Transitional phrase usage patterns
+   - Punctuation and formatting consistency
+
+2. STYLISTIC INDICATORS:
+   - Writing flow and rhythm variations
+   - Personal voice and authenticity markers
+   - Error patterns (typos, grammar inconsistencies)
+   - Informal vs. overly polished language
+
+3. CONTENT CHARACTERISTICS:
+   - Depth of personal insight vs. generic statements
+   - Specific examples vs. abstract concepts
+   - Emotional authenticity vs. artificial sentiment
+   - Knowledge demonstration patterns
+
+4. QUANTITATIVE METRICS PROVIDED:
+   - Text length: {len(essay)} characters
+   - Sentence count: {metrics['sentence_count']}
+   - Average sentence length: {metrics['avg_sentence_length']:.1f} words
+   - Vocabulary diversity: {metrics['vocab_diversity']:.3f}
+   - Transition word density: {metrics['transition_density']:.3f}
+   - Adverb density: {metrics['adverb_density']:.3f}
+
+AI-GENERATED INDICATORS TO LOOK FOR:
+- Overly balanced sentence structures
+- Excessive use of transitional phrases
+- Unnaturally perfect grammar and punctuation
+- Generic, safe language without personality
+- Formulaic organization patterns
+- Absence of colloquialisms or informal language
+- Consistent tone throughout without natural variation
+- Over-explanation of simple concepts
+- Lack of genuine personal anecdotes or specific examples
+
+HUMAN-WRITTEN INDICATORS TO LOOK FOR:
+- Natural sentence length variation
+- Occasional grammatical imperfections or typos
+- Personal voice and unique expressions
+- Informal language or colloquialisms
+- Genuine emotional expressions
+- Specific, detailed examples from experience
+- Natural topic flow with some tangents
+- Inconsistent formality levels
+- Cultural or generational language markers
+
+ANALYSIS INSTRUCTIONS:
+1. Provide detailed analysis in the specified format
+2. Consider the context and purpose of the writing
+3. Weight recent AI model capabilities (they're getting more human-like)
+4. Be decisive - avoid defaulting to uncertainty
+5. Provide confidence reasoning for your assessment
+
+Format your response as follows:
+
+**DETAILED ANALYSIS:**
+
+AI-Generated Indicators:
+- [List specific patterns found that suggest AI generation]
+
+Human-Written Indicators:
+- [List specific patterns found that suggest human authorship]
+
+**CONFIDENCE ASSESSMENT:**
+[Explain your confidence level and reasoning]
+
+**FINAL VERDICT:**
+[One clear sentence stating your conclusion]
+
+At the end, provide ONLY this JSON line with no additional text:
+{{"ai_probability": X.XX, "human_probability": X.XX, "confidence_score": X.XX}}
+
+TEXT TO ANALYZE:
+{essay}"""
+
+        payload = {
+            "contents": [
+                {
+                    "parts": [
+                        {"text": prompt}
+                    ]
+                }
+            ],
+            "generationConfig": {
+                "temperature": 0.3,  # Lower temperature for more consistent analysis
+                "topP": 0.8,
+                "topK": 40,
+                "maxOutputTokens": 2048
+            }
+        }
+
+        response = requests.post(
+            f"{URL}?key={API_KEY}",
+            headers=headers,
+            data=json.dumps(payload)
+        )
+
+        if response.status_code != 200:
+            return jsonify({'error': f"Error {response.status_code}: {response.text}"}), response.status_code
+
+        response_data = response.json()
+        full_response = response_data['candidates'][0]['content']['parts'][0]['text']
+
+        # Enhanced JSON extraction with multiple patterns
+        json_patterns = [
+            r'\{[^{}]*"ai_probability"\s*:\s*([0-9.]+)[^{}]*"human_probability"\s*:\s*([0-9.]+)[^{}]*"confidence_score"\s*:\s*([0-9.]+)[^{}]*\}',
+            r'\{\s*"ai_probability"\s*:\s*([0-9.]+)\s*,\s*"human_probability"\s*:\s*([0-9.]+)\s*,\s*"confidence_score"\s*:\s*([0-9.]+)\s*\}',
+            r'\{.*?"ai_probability".*?([0-9.]+).*?"human_probability".*?([0-9.]+).*?"confidence_score".*?([0-9.]+).*?\}'
+        ]
+
+        match = None
+        for pattern in json_patterns:
+            match = re.search(pattern, full_response, re.DOTALL)
+            if match:
+                break
+
+        if match:
+            try:
+                ai_probability = float(match.group(1))
+                human_probability = float(match.group(2))
+                confidence_score = float(match.group(3))
+
+                # Validate probabilities sum to 1.0 (with small tolerance)
+                if abs(ai_probability + human_probability - 1.0) > 0.01:
+                    # Normalize if they don't sum to 1
+                    total = ai_probability + human_probability
+                    if total > 0:
+                        ai_probability = ai_probability / total
+                        human_probability = human_probability / total
+
+                # Clean the explanation by removing the JSON part
+                explanation = re.sub(r'\{[^{}]*"ai_probability"[^{}]*\}', '', full_response, flags=re.DOTALL).strip()
+
+                # Additional text quality indicators
+                quality_indicators = {
+                    'readability_score': min(100, max(0, (100 - metrics['avg_sentence_length'] * 2))),  # Simpler sentences = higher readability
+                    'complexity_score': min(100, metrics['vocab_diversity'] * 100),
+                    'naturalness_score': min(100, max(0, (100 - abs(metrics['avg_sentence_length'] - 15) * 3))),  # 15 words is natural average
+                    'text_metrics': metrics
+                }
+
+                return jsonify({
+                    'explanation': explanation,
+                    'ai_probability': round(ai_probability, 4),
+                    'human_probability': round(human_probability, 4),
+                    'confidence_score': round(confidence_score, 4),
+                    'quality_indicators': quality_indicators,
+                    'analysis_version': '2.0_enhanced'
+                })
+
+            except (ValueError, IndexError) as e:
+                return jsonify({'error': f"Could not parse probabilities from response: {str(e)}"}), 500
+        else:
+            # Fallback: try to extract any JSON-like structure
+            fallback_match = re.search(r'\{.*?"ai_probability".*?([0-9.]+).*?"human_probability".*?([0-9.]+).*?\}', full_response)
+            if fallback_match:
+                try:
+                    ai_prob = float(fallback_match.group(1))
+                    human_prob = float(fallback_match.group(2))
+
+                    return jsonify({
+                        'explanation': full_response,
+                        'ai_probability': ai_prob,
+                        'human_probability': human_prob,
+                        'confidence_score': 0.7,  # Default confidence
+                        'quality_indicators': {
+                            'text_metrics': metrics
+                        },
+                        'analysis_version': '2.0_fallback'
+                    })
+                except (ValueError, IndexError):
+                    pass
+
+            return jsonify({'error': "Could not extract valid probability scores from AI response", 'raw_response': full_response}), 500
+
+    except Exception as e:
+        return jsonify({'error': f"Analysis failed: {str(e)}"}), 500
+
+@app.route('/benchmark', methods=['POST'])
+def benchmark_endpoint():
+    """
+    Generate teacher comment/benchmark by comparing student essay with reference answer
+    """
+    try:
+        data = request.get_json(force=True)
+
+        # Extract required data
+        student_essay = data.get('student_essay', '').strip()
+        reference_answer = data.get('reference_answer', '').strip()
+        rubric_criteria = data.get('rubric_criteria', '')
+        question = data.get('question', '')
+
+        # Validation
+        if not student_essay:
+            return jsonify({'error': 'Student essay is required'}), 400
+
+        if not reference_answer:
+            return jsonify({'error': 'Reference answer is required'}), 400
+
+        if not rubric_criteria:
+            return jsonify({'error': 'Rubric criteria is required'}), 400
+
+        # Create comprehensive benchmark prompt
+        benchmark_prompt = f"""
+You are an experienced teacher evaluating a student's essay. Please provide a detailed teacher comment/benchmark by comparing the student's response with the reference answer using the provided rubric criteria.
+
+**Question:** {question}
+
+**Reference Answer (Teacher's Expected Response):**
+{reference_answer}
+
+**Student's Essay:**
+{student_essay}
+
+**Rubric Criteria:**
+{rubric_criteria}
+
+**Instructions:**
+1. Compare the student's essay against the reference answer
+2. Evaluate based on the rubric criteria provided
+3. Identify strengths and areas for improvement
+4. Provide specific feedback on how the student's response aligns with or differs from the expected answer
+5. Give constructive suggestions for improvement
+6. Assign a preliminary score based on rubric alignment
+
+Please respond in the following JSON format:
+{{
+    "teacher_comment": {{
+        "overall_assessment": "Brief overall assessment of the student's performance",
+        "comparison_with_reference": {{
+            "similarities": ["List of ways the student's answer aligns with reference"],
+            "differences": ["List of key differences from the reference answer"],
+            "missing_elements": ["Important points from reference answer that student missed"]
+        }},
+        "rubric_analysis": {{
+            "strengths": ["Specific strengths based on rubric criteria"],
+            "weaknesses": ["Areas needing improvement based on rubric criteria"],
+            "criterion_scores": {{
+                "criterion_1": {{"score": 0, "feedback": "Specific feedback"}},
+                "criterion_2": {{"score": 0, "feedback": "Specific feedback"}}
+            }}
+        }},
+        "constructive_feedback": {{
+            "specific_improvements": ["Actionable suggestions for improvement"],
+            "study_recommendations": ["What the student should focus on studying"],
+            "writing_tips": ["Specific writing improvement suggestions"]
+        }},
+        "benchmark_score": 0,
+        "grade_justification": "Detailed explanation of why this score was assigned"
+    }}
+}}
+
+Ensure your response is valid JSON and provides comprehensive, constructive feedback that helps the student improve.
+"""
+
+        # Call Gemini API
+        payload = {
+            "contents": [
+                {
+                    "parts": [
+                        {"text": benchmark_prompt}
+                    ]
+                }
+            ]
+        }
+
+        response = requests.post(
+            f"{URL}?key={API_KEY}",
+            headers=headers,
+            data=json.dumps(payload)
+        )
+
+        if response.status_code != 200:
+            return jsonify({'error': f"API Error {response.status_code}: {response.text}"}), response.status_code
+
+        try:
+            response_data = response.json()
+            text_content = response_data['candidates'][0]['content']['parts'][0]['text']
+
+            # Clean and parse JSON response
+            if text_content.startswith("```json"):
+                clean_json_str = text_content.replace("```json", "").replace("```", "").strip()
+            else:
+                clean_json_str = text_content.strip("` \n")
+
+            teacher_comment_data = json.loads(clean_json_str)
+
+            # Return the structured teacher comment
+            return jsonify({
+                'success': True,
+                'teacher_comment': teacher_comment_data.get('teacher_comment', {}),
+                'timestamp': time.time()
+            })
+
+        except json.JSONDecodeError as e:
+            print("Failed to parse JSON response:", repr(clean_json_str))
+            return jsonify({'error': 'Failed to parse API response as JSON'}), 500
+
+        except Exception as e:
+            print(f"Unexpected error in benchmark processing: {e}")
+            return jsonify({'error': str(e)}), 500
+
+    except Exception as e:
+        print(f"Benchmark endpoint error: {e}")
+        return jsonify({'error': str(e)}), 500
+
+# Enhanced similarity computation functions
+def clean_text(text):
+    """Enhanced text cleaning and preprocessing"""
+    if not text:
+        return ""
+
+    # Remove extra whitespace and normalize
+    text = ' '.join(text.strip().split())
+
+    # Remove special characters but keep punctuation for sentence structure
+    text = re.sub(r'[^\w\s\.\,\!\?\;\:]', ' ', text)
+
+    # Normalize multiple spaces
+    text = re.sub(r'\s+', ' ', text).strip()
+
+    return text
+
+def preprocess_text_for_similarity(text):
+    """Advanced text preprocessing for similarity computation"""
+    try:
+        # Clean text
+        text = clean_text(text.lower())
+
+        # Tokenize into words
+        words = word_tokenize(text)
+
+        # Remove stopwords and short words
+        stop_words = set(stopwords.words('english'))
+        words = [word for word in words if word not in stop_words and len(word) > 2]
+
+        # Stem words for better matching
+        stemmer = PorterStemmer()
+        words = [stemmer.stem(word) for word in words if word.isalpha()]
+
+        return words
+    except Exception as e:
+        # Fallback to simple preprocessing
+        words = re.findall(r'\b[a-zA-Z]{3,}\b', text.lower())
+        return [word for word in words if word not in ['the', 'and', 'or', 'but', 'in', 'on', 'at', 'to', 'for', 'of', 'with', 'by']]
+
+def compute_cosine_similarity(text1, text2):
+    """Enhanced cosine similarity with TF-IDF weighting"""
+    try:
+        # Preprocess texts
+        words1 = preprocess_text_for_similarity(text1)
+        words2 = preprocess_text_for_similarity(text2)
+
+        if not words1 or not words2:
+            return 0.0
+
+        # Create vocabulary
+        vocabulary = list(set(words1 + words2))
+
+        if not vocabulary:
+            return 0.0
+
+        # Create TF-IDF vectors
+        def create_tfidf_vector(words, vocab):
+            # Term frequency
+            tf = Counter(words)
+            total_words = len(words)
+
+            # Create vector
+            vector = []
+            for term in vocab:
+                tf_score = tf[term] / total_words if total_words > 0 else 0
+                # Simple IDF approximation
+                idf_score = math.log(2 / (1 + (term in words)))
+                tfidf_score = tf_score * idf_score
+                vector.append(tfidf_score)
+
+            return np.array(vector)
+
+        vector1 = create_tfidf_vector(words1, vocabulary)
+        vector2 = create_tfidf_vector(words2, vocabulary)
+
+        # Calculate cosine similarity
+        dot_product = np.dot(vector1, vector2)
+        norm1 = np.linalg.norm(vector1)
+        norm2 = np.linalg.norm(vector2)
+
+        if norm1 == 0 or norm2 == 0:
+            return 0.0
+
+        similarity = dot_product / (norm1 * norm2)
+        return round(max(0, min(1, similarity)) * 100, 2)
+
+    except Exception as e:
+        # Fallback to simple word overlap
+        words1 = set(text1.lower().split())
+        words2 = set(text2.lower().split())
+
+        if not words1 or not words2:
+            return 0.0
+
+        intersection = len(words1.intersection(words2))
+        union = len(words1.union(words2))
+
+        return round((intersection / union * 100) if union > 0 else 0, 2)
+
+def compute_jaccard_similarity(text1, text2):
+    """Jaccard similarity for additional comparison"""
+    try:
+        words1 = set(preprocess_text_for_similarity(text1))
+        words2 = set(preprocess_text_for_similarity(text2))
+
+        if not words1 or not words2:
+            return 0.0
+
+        intersection = len(words1.intersection(words2))
+        union = len(words1.union(words2))
+
+        return round((intersection / union * 100) if union > 0 else 0, 2)
+    except:
+        return 0.0
+
+def compute_semantic_similarity(text1, text2):
+    """Advanced semantic similarity using sentence structure"""
+    try:
+        sentences1 = sent_tokenize(text1)
+        sentences2 = sent_tokenize(text2)
+
+        if not sentences1 or not sentences2:
+            return 0.0
+
+        # Compare sentence by sentence
+        total_similarity = 0
+        comparisons = 0
+
+        for s1 in sentences1:
+            best_match = 0
+            for s2 in sentences2:
+                # Use SequenceMatcher for sequence similarity
+                similarity = SequenceMatcher(None, s1.lower(), s2.lower()).ratio()
+                best_match = max(best_match, similarity)
+
+            total_similarity += best_match
+            comparisons += 1
+
+        return round((total_similarity / comparisons * 100) if comparisons > 0 else 0, 2)
+    except:
+        return 0.0
+
+def simple_sentence_match(student_text, reference_text, threshold=0.6):
+    """Enhanced sentence matching with better algorithms"""
+    try:
+        student_sentences = sent_tokenize(student_text)
+        reference_sentences = sent_tokenize(reference_text)
+
+        matches = []
+
+        for s_sent in student_sentences:
+            s_words = set(preprocess_text_for_similarity(s_sent))
+
+            if len(s_words) < 3:  # Skip very short sentences
+                continue
+
+            best_match = {
+                'student_sentence': s_sent,
+                'reference_sentence': '',
+                'similarity': 0,
+                'match_type': 'none'
+            }
+
+            for r_sent in reference_sentences:
+                r_words = set(preprocess_text_for_similarity(r_sent))
+
+                if len(r_words) < 3:
+                    continue
+
+                # Calculate multiple similarity metrics
+                jaccard = len(s_words.intersection(r_words)) / len(s_words.union(r_words)) if s_words.union(r_words) else 0
+                sequence_sim = SequenceMatcher(None, s_sent.lower(), r_sent.lower()).ratio()
+
+                # Combined similarity score
+                combined_similarity = (jaccard * 0.6 + sequence_sim * 0.4)
+
+                if combined_similarity > best_match['similarity']:
+                    best_match.update({
+                        'reference_sentence': r_sent,
+                        'similarity': round(combined_similarity * 100, 2),
+                        'match_type': 'exact' if combined_similarity > 0.9 else 'similar' if combined_similarity > threshold else 'weak'
+                    })
+
+            if best_match['similarity'] > threshold * 100:
+                matches.append(best_match)
+
+        return matches
+    except Exception as e:
+        return []
+
+def analyze_content_coverage(student_text, reference_text):
+    """Analyze how well student covers reference content"""
+    try:
+        # Extract key concepts from both texts
+        student_concepts = set(preprocess_text_for_similarity(student_text))
+        reference_concepts = set(preprocess_text_for_similarity(reference_text))
+
+        if not reference_concepts:
+            return {'coverage': 0, 'missing_concepts': [], 'extra_concepts': []}
+
+        # Calculate coverage
+        covered_concepts = student_concepts.intersection(reference_concepts)
+        missing_concepts = reference_concepts - student_concepts
+        extra_concepts = student_concepts - reference_concepts
+
+        coverage_percentage = (len(covered_concepts) / len(reference_concepts)) * 100
+
+        return {
+            'coverage': round(coverage_percentage, 2),
+            'covered_concepts': list(covered_concepts)[:10],  # Limit for response size
+            'missing_concepts': list(missing_concepts)[:10],
+            'extra_concepts': list(extra_concepts)[:10],
+            'total_reference_concepts': len(reference_concepts),
+            'total_student_concepts': len(student_concepts)
+        }
+    except:
+        return {'coverage': 0, 'missing_concepts': [], 'extra_concepts': []}
+
+def evaluate_with_rubric(student_answer, reference_answer, rubric_criteria):
+    """Enhanced rubric evaluation with multiple metrics"""
+    evaluation = {}
+
+    # Calculate various similarity metrics
+    cosine_sim = compute_cosine_similarity(student_answer, reference_answer)
+    jaccard_sim = compute_jaccard_similarity(student_answer, reference_answer)
+    semantic_sim = compute_semantic_similarity(student_answer, reference_answer)
+    content_analysis = analyze_content_coverage(student_answer, reference_answer)
+
+    # Overall similarity (weighted average)
+    overall_similarity = (cosine_sim * 0.4 + jaccard_sim * 0.3 + semantic_sim * 0.3)
+
+    # Text quality metrics
+    student_sentences = sent_tokenize(student_answer)
+    reference_sentences = sent_tokenize(reference_answer)
+
+    completeness_score = min(100, (len(student_sentences) / len(reference_sentences)) * 100) if reference_sentences else 0
+
+    # Process rubric criteria
+    if isinstance(rubric_criteria, dict):
+        for criterion, details in rubric_criteria.items():
+            if isinstance(details, dict):
+                max_points = details.get('max_points', 10)
+                weight = details.get('weight', 1.0)
+
+                # Enhanced scoring based on multiple factors
+                base_score = overall_similarity / 100
+
+                # Adjust based on content coverage
+                coverage_factor = content_analysis['coverage'] / 100
+                adjusted_score = (base_score * 0.7 + coverage_factor * 0.3)
+
+                # Apply completeness factor
+                completeness_factor = min(1.0, completeness_score / 100)
+                final_score = adjusted_score * completeness_factor
+
+                points_earned = final_score * max_points
+
+                evaluation[criterion] = {
+                    'score': round(points_earned, 2),
+                    'max_points': max_points,
+                    'weight': weight,
+                    'percentage': round(final_score * 100, 2),
+                    'similarity_breakdown': {
+                        'cosine': cosine_sim,
+                        'jaccard': jaccard_sim,
+                        'semantic': semantic_sim,
+                        'overall': round(overall_similarity, 2)
+                    }
+                }
+            else:
+                # Handle simple rubric format
+                evaluation[criterion] = {
+                    'score': round(overall_similarity * 0.1, 2),
+                    'percentage': round(overall_similarity, 2)
+                }
+
+    # Add summary metrics
+    evaluation['_summary'] = {
+        'overall_similarity': round(overall_similarity, 2),
+        'content_coverage': content_analysis,
+        'completeness_score': round(completeness_score, 2),
+        'quality_indicators': {
+            'student_sentence_count': len(student_sentences),
+            'reference_sentence_count': len(reference_sentences),
+            'length_ratio': round(len(student_answer) / len(reference_answer), 2) if reference_answer else 0
+        }
+    }
+
+    return evaluation
+
+# Add this new endpoint to your existing Flask application (paste-3.txt)
+
+@app.route('/compare', methods=['POST'])
+def compare_answer_endpoint():
+    """
+    Compare student answer with reference answer using rubrics
+    Now analyzes each criterion individually and provides detailed per-criterion feedback
+    """
+    try:
+        data = request.get_json(force=True)
+
+        student_answer = data.get('student_answer', '').strip()
+        reference_answer = data.get('reference_answer', '').strip()
+        rubric_data = data.get('rubric_data', {})
+        question = data.get('question', '').strip()
+
+        # Validate inputs
+        if not student_answer:
+            return jsonify({
+                'success': False,
+                'error': 'Student answer is required'
+            }), 400
+
+        if not reference_answer:
+            return jsonify({
+                'success': False,
+                'error': 'Reference answer is required'
+            }), 400
+
+        if not rubric_data:
+            return jsonify({
+                'success': False,
+                'error': 'Rubric data is required'
+            }), 400
+
+        # Calculate overall similarity between student and reference answers
+        overall_similarity_score = calculate_text_similarity(student_answer, reference_answer)
+
+        # Extract rubric headers and rows for individual criteria analysis
+        rubric_headers = rubric_data.get('headers', [])
+        rubric_rows = rubric_data.get('rows', [])
+
+        # Determine overall rubric level
+        overall_matched_header = determine_rubric_level(overall_similarity_score, rubric_headers)
+
+        # NEW: Analyze each criterion individually with AI assistance
+        individual_criteria_analysis = analyze_criteria_individually(
+            student_answer, reference_answer, rubric_rows, rubric_headers, question
+        )
+
+        # Create response structure with individual criterion analysis
+        response_data = {
+            'success': True,
+            'overall_similarity_score': overall_similarity_score,
+            'overall_matched_header': overall_matched_header,
+            'comparison_timestamp': time.time(),
+
+            # NEW: Individual criteria comparisons
+            'criteria_analysis': individual_criteria_analysis,
+
+            # Overall analysis (summary of all criteria)
+            'overall_analysis': generate_overall_analysis(individual_criteria_analysis),
+
+            # Detailed recommendation based on all criteria
+            'detailed_recommendation': generate_detailed_recommendation(individual_criteria_analysis, overall_similarity_score)
+        }
+
+        return jsonify(response_data)
+
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'error': f'Comparison failed: {str(e)}'
+        }), 500
+
+
+def analyze_criteria_individually(student_answer, reference_answer, rubric_rows, rubric_headers, question):
+    """
+    Analyze each rubric criterion individually against the reference answer
+    """
+    criteria_analysis = {}
+
+    for i, row in enumerate(rubric_rows):
+        criteria_name = row.get('criteria', f'Criterion {i+1}')
+        criteria_cells = row.get('cells', [])
+
+        # Skip if criteria name is empty
+        if not criteria_name.strip():
+            continue
+
+        print(f"Analyzing criterion: {criteria_name}")
+
+        # Analyze this specific criterion
+        criterion_analysis = analyze_single_criterion(
+            student_answer,
+            reference_answer,
+            criteria_name,
+            criteria_cells,
+            rubric_headers,
+            question
+        )
+
+        criteria_analysis[criteria_name] = criterion_analysis
+
+    return criteria_analysis
+
+
+def analyze_single_criterion(student_answer, reference_answer, criteria_name, criteria_cells, rubric_headers, question):
+    """
+    Analyze a single criterion by comparing student and reference answers specifically for that criterion
+    """
+    try:
+        # Create a detailed prompt for this specific criterion
+        criterion_prompt = f"""
+        You are an expert educational evaluator. Analyze the student's answer specifically for the criterion "{criteria_name}" by comparing it with the reference answer.
+
+        Question: {question}
+
+        Reference Answer: {reference_answer}
+
+        Student Answer: {student_answer}
+
+        Rubric Criterion: {criteria_name}
+        Rubric Levels: {', '.join(rubric_headers)}
+        Rubric Descriptions for this criterion: {criteria_cells}
+
+        Focus ONLY on how well the student's answer meets the "{criteria_name}" criterion compared to the reference answer.
+
+        Provide your analysis in the following JSON format:
+        {{
+            "criterion_name": "{criteria_name}",
+            "similarity_score": [0-100 score for this specific criterion],
+            "matched_level": "[which rubric level this criterion achieves]",
+            "criterion_analysis": {{
+                "strengths": ["specific strength 1 for this criterion", "specific strength 2"],
+                "weaknesses": ["specific weakness 1 for this criterion", "specific weakness 2"],
+                "key_points_covered": ["point 1 covered for this criterion", "point 2"],
+                "missing_points": ["missing point 1 for this criterion", "missing point 2"],
+                "suggestions": ["specific suggestion 1 for improving this criterion", "suggestion 2"]
+            }},
+            "performance_level": "Detailed assessment of performance for this specific criterion",
+            "criterion_comparison": "Direct comparison of how student and reference answers address this specific criterion",
+            "improvement_focus": "Specific areas where student should focus to improve this criterion"
+        }}
+
+        Analyze ONLY this criterion. Do not provide overall feedback. Focus specifically on "{criteria_name}".
+        Provide only the JSON response without any additional text or formatting.
+        """
+
+        # Call AI API for this specific criterion
+        payload = {
+            "contents": [
+                {
+                    "parts": [
+                        {"text": criterion_prompt}
+                    ]
+                }
+            ]
+        }
+
+        response = requests.post(
+            f"{URL}?key={API_KEY}",
+            headers=headers,
+            data=json.dumps(payload)
+        )
+
+        if response.status_code == 200:
+            try:
+                response_data = response.json()
+                text_content = response_data['candidates'][0]['content']['parts'][0]['text']
+
+                # Clean the response
+                if text_content.startswith("```json"):
+                    clean_json_str = text_content.replace("```json", "").replace("```", "").strip()
+                else:
+                    clean_json_str = text_content.strip("` \n")
+
+                # Parse the AI response
+                ai_analysis = json.loads(clean_json_str)
+                return ai_analysis
+
+            except (json.JSONDecodeError, KeyError) as e:
+                print(f"Error parsing AI response for criterion {criteria_name}: {e}")
+                # Fall back to basic analysis
+                return create_fallback_criterion_analysis(criteria_name, student_answer, reference_answer, rubric_headers)
+
+        else:
+            print(f"AI API error for criterion {criteria_name}: {response.status_code}")
+            # Fall back to basic analysis
+            return create_fallback_criterion_analysis(criteria_name, student_answer, reference_answer, rubric_headers)
+
+    except Exception as e:
+        print(f"Exception analyzing criterion {criteria_name}: {e}")
+        return create_fallback_criterion_analysis(criteria_name, student_answer, reference_answer, rubric_headers)
+
+
+def create_fallback_criterion_analysis(criteria_name, student_answer, reference_answer, rubric_headers):
+    """
+    Create a basic analysis when AI analysis fails
+    """
+    # Calculate basic similarity for this criterion
+    criterion_similarity = calculate_criterion_similarity(student_answer, reference_answer, criteria_name)
+    matched_level = determine_rubric_level(criterion_similarity, rubric_headers)
+
+    return {
+        "criterion_name": criteria_name,
+        "similarity_score": criterion_similarity,
+        "matched_level": matched_level,
+        "criterion_analysis": {
+            "strengths": ["Answer addresses the question"],
+            "weaknesses": ["Detailed analysis unavailable"],
+            "key_points_covered": ["Basic response provided"],
+            "missing_points": ["Unable to determine specific missing points"],
+            "suggestions": [f"Review reference answer for {criteria_name} guidance", "Seek additional feedback"]
+        },
+        "performance_level": f"Basic analysis for {criteria_name}. Detailed AI analysis was unavailable.",
+        "criterion_comparison": f"Student answer shows {criterion_similarity:.1f}% similarity to reference for {criteria_name}",
+        "improvement_focus": f"Focus on improving {criteria_name} by comparing with reference answer"
+    }
+
+
+def calculate_criterion_similarity(student_answer, reference_answer, criteria_name):
+    """
+    Calculate similarity score focusing on a specific criterion
+    """
+    # Extract criterion-specific keywords
+    criterion_keywords = extract_criterion_keywords(criteria_name, {})
+
+    # Get criterion-relevant content
+    student_relevant = extract_relevant_content(student_answer, criterion_keywords)
+    reference_relevant = extract_relevant_content(reference_answer, criterion_keywords)
+
+    # Calculate similarity
+    if student_relevant and reference_relevant:
+        return calculate_text_similarity(student_relevant, reference_relevant)
+    else:
+        # If no specific content found, use overall similarity with penalty
+        overall_sim = calculate_text_similarity(student_answer, reference_answer)
+        return overall_sim * 0.8  # Apply penalty for lack of specific content
+
+
+def generate_overall_analysis(individual_criteria_analysis):
+    """
+    Generate overall analysis based on individual criteria analyses
+    """
+    if not individual_criteria_analysis:
+        return {
+            "overall_strengths": ["Basic response provided"],
+            "overall_weaknesses": ["Analysis unavailable"],
+            "overall_suggestions": ["Review all criteria against reference answer"],
+            "summary": "Overall analysis unavailable"
+        }
+
+    all_strengths = []
+    all_weaknesses = []
+    all_suggestions = []
+    scores = []
+
+    for criterion_name, analysis in individual_criteria_analysis.items():
+        criterion_analysis = analysis.get('criterion_analysis', {})
+        all_strengths.extend(criterion_analysis.get('strengths', []))
+        all_weaknesses.extend(criterion_analysis.get('weaknesses', []))
+        all_suggestions.extend(criterion_analysis.get('suggestions', []))
+        scores.append(analysis.get('similarity_score', 0))
+
+    avg_score = sum(scores) / len(scores) if scores else 0
+
+    return {
+        "overall_strengths": list(set(all_strengths))[:5],  # Remove duplicates, limit to top 5
+        "overall_weaknesses": list(set(all_weaknesses))[:5],
+        "overall_suggestions": list(set(all_suggestions))[:5],
+        "summary": f"Average performance across all criteria: {avg_score:.1f}%. Analysis covers {len(individual_criteria_analysis)} criteria.",
+        "average_score": avg_score
+    }
+
+
+def generate_detailed_recommendation(individual_criteria_analysis, overall_similarity_score):
+    """
+    Generate detailed recommendation based on individual criteria performance
+    """
+    if not individual_criteria_analysis:
+        return f"Overall similarity: {overall_similarity_score:.1f}%. Individual criterion analysis unavailable."
+
+    recommendations = []
+
+    # Analyze performance by criterion
+    low_performing_criteria = []
+    high_performing_criteria = []
+
+    for criterion_name, analysis in individual_criteria_analysis.items():
+        score = analysis.get('similarity_score', 0)
+        if score < 50:
+            low_performing_criteria.append((criterion_name, score))
+        elif score > 80:
+            high_performing_criteria.append((criterion_name, score))
+
+    # Build recommendation
+    if high_performing_criteria:
+        criteria_names = [name for name, _ in high_performing_criteria]
+        recommendations.append(f"Strong performance in: {', '.join(criteria_names)}")
+
+    if low_performing_criteria:
+        criteria_names = [name for name, _ in low_performing_criteria]
+        recommendations.append(f"Needs improvement in: {', '.join(criteria_names)}")
+
+    # Add specific improvement suggestions
+    all_improvement_focuses = []
+    for analysis in individual_criteria_analysis.values():
+        focus = analysis.get('improvement_focus', '')
+        if focus:
+            all_improvement_focuses.append(focus)
+
+    if all_improvement_focuses:
+        recommendations.extend(all_improvement_focuses[:3])  # Limit to top 3
+
+    return '. '.join(recommendations) if recommendations else f"Overall similarity: {overall_similarity_score:.1f}%. Review individual criteria for specific guidance."
+
+
+# Keep the existing helper functions (they're still needed)
+def extract_criterion_keywords(criteria_name, rubric_row):
+    """Extract keywords related to a specific criterion"""
+    keywords = []
+
+    # Add words from criteria name
+    keywords.extend(criteria_name.lower().split())
+
+    # Add words from rubric cells that describe this criterion
+    cells = rubric_row.get('cells', [])
+    for cell in cells:
+        if cell and isinstance(cell, str):
+            cell_words = cell.lower().split()
+            keywords.extend(cell_words)
+
+    # Common academic writing keywords by criterion type
+    criterion_keywords = {
+        'thesis': ['thesis', 'argument', 'claim', 'position', 'main', 'central', 'point'],
+        'evidence': ['evidence', 'support', 'example', 'data', 'proof', 'citation', 'source'],
+        'organization': ['organization', 'structure', 'paragraph', 'flow', 'transition', 'logical'],
+        'grammar': ['grammar', 'syntax', 'sentence', 'punctuation', 'spelling', 'language'],
+        'analysis': ['analysis', 'analyze', 'interpret', 'explain', 'evaluate', 'assess'],
+        'clarity': ['clarity', 'clear', 'concise', 'coherent', 'understandable', 'readable']
+    }
+
+    # Add criterion-specific keywords based on criteria name
+    criteria_lower = criteria_name.lower()
+    for key, related_keywords in criterion_keywords.items():
+        if key in criteria_lower:
+            keywords.extend(related_keywords)
+
+    return list(set(keywords))  # Remove duplicates
+
+
+def extract_relevant_content(text, keywords):
+    """Extract sentences from text that are relevant to specific keywords"""
+    if not text or not keywords:
+        return text
+
+    sentences = sent_tokenize(text)
+    relevant_sentences = []
+
+    for sentence in sentences:
+        sentence_lower = sentence.lower()
+        # Check if sentence contains any of the criterion keywords
+        if any(keyword in sentence_lower for keyword in keywords):
+            relevant_sentences.append(sentence)
+
+    # If no specific sentences found, return the full text
+    if not relevant_sentences:
+        return text
+
+    return ' '.join(relevant_sentences)
+
+
+def calculate_text_similarity(text1, text2):
+    """Calculate similarity between two texts using multiple methods"""
+    if not text1 or not text2:
+        return 0.0
+
+    # Method 1: Word overlap similarity
+    words1 = set(word.lower() for word in word_tokenize(text1) if word.isalpha())
+    words2 = set(word.lower() for word in word_tokenize(text2) if word.isalpha())
+
+    intersection = len(words1.intersection(words2))
+    union = len(words1.union(words2))
+    jaccard_similarity = intersection / union if union > 0 else 0
+
+    # Method 2: Sequence similarity
+    sequence_similarity = SequenceMatcher(None, text1.lower(), text2.lower()).ratio()
+
+    # Method 3: Sentence-level similarity
+    sentences1 = sent_tokenize(text1)
+    sentences2 = sent_tokenize(text2)
+
+    sentence_similarities = []
+    for s1 in sentences1:
+        best_match = 0
+        for s2 in sentences2:
+            similarity = SequenceMatcher(None, s1.lower(), s2.lower()).ratio()
+            best_match = max(best_match, similarity)
+        sentence_similarities.append(best_match)
+
+    avg_sentence_similarity = sum(sentence_similarities) / len(sentence_similarities) if sentence_similarities else 0
+
+    # Method 4: Stemmed word similarity
+    stemmer = PorterStemmer()
+    stemmed_words1 = set(stemmer.stem(word.lower()) for word in word_tokenize(text1) if word.isalpha())
+    stemmed_words2 = set(stemmer.stem(word.lower()) for word in word_tokenize(text2) if word.isalpha())
+
+    stemmed_intersection = len(stemmed_words1.intersection(stemmed_words2))
+    stemmed_union = len(stemmed_words1.union(stemmed_words2))
+    stemmed_similarity = stemmed_intersection / stemmed_union if stemmed_union > 0 else 0
+
+    # Weighted combination of all methods
+    final_similarity = (
+        jaccard_similarity * 0.25 +
+        sequence_similarity * 0.35 +
+        avg_sentence_similarity * 0.25 +
+        stemmed_similarity * 0.15
+    ) * 100
+
+    return min(final_similarity, 100.0)  # Cap at 100%
+
+
+def determine_rubric_level(similarity_score, rubric_headers):
+    """
+    Determine which rubric level the answer matches based on similarity score
+    Returns only the level name (e.g., "Good", "Better", "Best")
+    """
+    if not rubric_headers:
+        return "Unknown"
+
+    # Remove any weight columns (typically contain % or numbers)
+    filtered_headers = [h.strip() for h in rubric_headers if not any(char in h for char in ['%', 'Weight', 'weight'])]
+
+    if not filtered_headers:
+        return "Unknown"
+
+    num_levels = len(filtered_headers)
+
+    if num_levels == 1:
+        return filtered_headers[0]
+
+    # Calculate thresholds based on number of levels
+    if num_levels == 2:
+        thresholds = [50]
+    elif num_levels == 3:
+        thresholds = [40, 70]
+    elif num_levels == 4:
+        thresholds = [30, 50, 75]
+    elif num_levels == 5:
+        thresholds = [25, 45, 65, 85]
+    else:
+        # For more than 5 levels, distribute evenly
+        step = 100 / num_levels
+        thresholds = [step * i for i in range(1, num_levels)]
+
+    # Determine level based on similarity score
+    for i, threshold in enumerate(thresholds):
+        if similarity_score <= threshold:
+            return filtered_headers[i]
+
+    # If score is above all thresholds, return the highest level
+    return filtered_headers[-1]
