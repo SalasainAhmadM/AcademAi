@@ -16,7 +16,7 @@ class EssayEvaluator
   /**
    * Detect AI-generated content in essay
    */
-  public function detectAIContent($essay, $apiUrl = 'https://olraceirdna.pythonanywhere.com/analyze')
+  public function detectAIContent($essay, $apiUrl = 'https://kaizokuDev.pythonanywhere.com/analyze')
   {
     // Validate input
     if (empty($essay) || str_word_count($essay) < 20) {
@@ -421,7 +421,7 @@ strictly follow the format of example output:
   /**
    * Call evaluation API
    */
-  public function callEvaluationAPI($data, $url = 'https://olraceirdna.pythonanywhere.com/evaluate')
+  public function callEvaluationAPI($data, $url = 'https://kaizokuDev.pythonanywhere.com/evaluate')
   {
     $ch = curl_init($url);
     if (!$ch) {
@@ -485,7 +485,7 @@ strictly follow the format of example output:
     }
 
     $allResults = [];
-    $api2Url = 'https://olraceirdna.pythonanywhere.com/check_plagiarism';
+    $api2Url = 'https://kaizokuDev.pythonanywhere.com/check_plagiarism';
     $googleApiKey = null;
     $googleCx = null;
 

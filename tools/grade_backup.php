@@ -2,7 +2,7 @@
 
 set_time_limit(300);
 $kiss = "";
-function detectAIContent($essay, $apiUrl = 'https://olraceirdna.pythonanywhere.com/analyze')
+function detectAIContent($essay, $apiUrl = 'https://kaizokuDev.pythonanywhere.com/analyze')
 {
   // Validate input
   if (empty($essay) || str_word_count($essay) < 20) {
@@ -132,7 +132,7 @@ function checkPlagiarism($essay, $api2Url, $googleApiKey = null, $googleCx = nul
 
 
 // Main execution
-$api2Url = 'https://olraceirdna.pythonanywhere.com/check_plagiarism';
+$api2Url = 'https://kaizokuDev.pythonanywhere.com/check_plagiarism';
 $googleApiKey = null;
 $googleCx = null;
 
@@ -300,7 +300,7 @@ try {
 
       //echo $criteriaFormatted;
 //echo $kiss;
-      $url = 'https://olraceirdna.pythonanywhere.com/evaluate';
+      $url = 'https://kaizokuDev.pythonanywhere.com/evaluate';
 
       $data = array(
         'rubrics_criteria' => $criteriaFormatted,

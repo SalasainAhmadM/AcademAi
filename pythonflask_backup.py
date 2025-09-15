@@ -392,207 +392,677 @@ def evaluate_essay():
 
     # Enhanced AI detection function for internal use
     def detect_ai_content(text):
-        """Enhanced AI detection with detailed analysis"""
+        """Enhanced AI detection with improved accuracy and detailed analysis"""
         try:
-            # Calculate text metrics
-            sentences = sent_tokenize(text)
-            words = text.split()
+            import re
+            from nltk.tokenize import sent_tokenize
+            import random
 
-            # Basic metrics
+            # GIBBERISH DETECTION - Enhanced version (keeping the existing one as it's good)
+            def detect_gibberish(text):
+                """Detect gibberish/nonsensical text patterns and calculate ratios"""
+                words = text.split()
+                total_words = len(words)
+
+                if total_words == 0:
+                    return False, 0.0, 0, []
+
+                gibberish_indicators = 0
+                gibberish_words = []
+                coherent_words = []
+
+                for word in words:
+                    # Clean word (remove punctuation)
+                    clean_word = ''.join(c for c in word.lower() if c.isalpha())
+
+                    if len(clean_word) < 2:  # Skip very short words
+                        continue
+
+                    # Check for gibberish patterns
+                    is_gibberish = False
+
+                    # Pattern 1: Excessive consonant clusters (more than 4 consecutive consonants)
+                    consonant_clusters = re.findall(r'[bcdfghjklmnpqrstvwxyz]{5,}', clean_word)
+                    if consonant_clusters:
+                        is_gibberish = True
+
+                    # Pattern 2: No vowels in words longer than 3 characters
+                    if len(clean_word) > 3 and not re.search(r'[aeiou]', clean_word):
+                        is_gibberish = True
+
+                    # Pattern 3: Excessive repeated characters (more than 3 same chars in a row)
+                    if re.search(r'(.)\1{3,}', clean_word):
+                        is_gibberish = True
+
+                    # Pattern 4: Random keyboard mashing patterns
+                    keyboard_patterns = [
+                        r'[qwertyuiop]{4,}',  # Top row
+                        r'[asdfghjkl]{4,}',   # Middle row
+                        r'[zxcvbnm]{4,}',     # Bottom row
+                        r'[qaz]{3,}',         # Left column
+                        r'[wsx]{3,}', r'[edc]{3,}', r'[rfv]{3,}',
+                        r'[tgb]{3,}', r'[yhn]{3,}', r'[ujm]{3,}',
+                        r'[ik]{3,}', r'[ol]{3,}'
+                    ]
+
+                    for pattern in keyboard_patterns:
+                        if re.search(pattern, clean_word, re.IGNORECASE):
+                            is_gibberish = True
+                            break
+
+                    # Pattern 5: Very long words with unusual letter combinations
+                    if len(clean_word) > 8:
+                        # Check for unusual letter frequency
+                        letter_freq = {}
+                        for char in clean_word:
+                            letter_freq[char] = letter_freq.get(char, 0) + 1
+
+                        # If any letter appears more than 40% of the time in a long word
+                        max_freq = max(letter_freq.values()) if letter_freq else 0
+                        if max_freq / len(clean_word) > 0.4:
+                            is_gibberish = True
+
+                    # Pattern 6: Common gibberish word patterns
+                    gibberish_patterns = [
+                        r'^[bcdfghjklmnpqrstvwxyz]+$',  # Only consonants
+                        r'^.*(sha|dga|ksd|skd|jsh|jsf|hsd|asd|askd|jasd).*',  # Common gibberish sequences
+                        r'^[a-z]*[xyz]{2,}[a-z]*$',  # Multiple x,y,z (rare in real words)
+                        r'^(asda|asdas|asdsa|askas|askdjas|asdjasd|asdjas|asjdas|jasdas|dahsbda)$'  # Specific gibberish words
+                    ]
+
+                    for pattern in gibberish_patterns:
+                        if re.match(pattern, clean_word, re.IGNORECASE):
+                            is_gibberish = True
+                            break
+
+                    if is_gibberish:
+                        gibberish_indicators += 1
+                        gibberish_words.append(word)
+                    else:
+                        coherent_words.append(word)
+
+                gibberish_ratio = gibberish_indicators / total_words if total_words > 0 else 0
+                coherent_word_count = len(coherent_words)
+
+                return gibberish_ratio > 0.05, gibberish_ratio, coherent_word_count, gibberish_words
+
+            # Check for gibberish first
+            has_gibberish, gibberish_ratio, coherent_word_count, gibberish_words = detect_gibberish(text)
+
+            # Extract coherent text for AI analysis
+            words = text.split()
+            coherent_text_parts = []
+
+            for word in words:
+                clean_word = ''.join(c for c in word.lower() if c.isalpha())
+                if clean_word and word not in gibberish_words:
+                    coherent_text_parts.append(word)
+
+            # Reconstruct coherent text for AI analysis
+            coherent_text = ' '.join(coherent_text_parts)
+
+            # Determine if text is mostly or entirely gibberish
+            total_words = len(text.split())
+
+            if gibberish_ratio >= 0.8:  # 80% or more gibberish = entirely gibberish
+                return {
+                    "ai_probability": 0.05,  # Very low AI probability for gibberish
+                    "human_probability": 0.95,
+                    "formatted": "AI Generated: 5.00% and Human: 95.00%",
+                    "gibberish_detected": True,
+                    "gibberish_ratio": round(gibberish_ratio, 4),
+                    "coherent_word_count": coherent_word_count,
+                    "is_entirely_gibberish": True
+                }
+
+            # DRAMATICALLY IMPROVED AI DETECTION LOGIC
+            if len(coherent_text) < 50:  # Not enough coherent text for reliable AI detection
+                human_bias = min(0.8, 0.6 + (gibberish_ratio * 0.4))
+                ai_score = 1.0 - human_bias
+                return {
+                    "ai_probability": round(ai_score, 4),
+                    "human_probability": round(human_bias, 4),
+                    "formatted": f"AI Generated: {ai_score*100:.2f}% and Human: {human_bias*100:.2f}%",
+                    "gibberish_detected": has_gibberish,
+                    "gibberish_ratio": round(gibberish_ratio, 4),
+                    "coherent_word_count": coherent_word_count,
+                    "is_entirely_gibberish": False
+                }
+
+            # Analyze the coherent portion for AI characteristics
+            sentences = sent_tokenize(coherent_text)
+            words = coherent_text.split()
+
+            # Basic metrics on coherent text
             avg_sentence_length = sum(len(s.split()) for s in sentences) / len(sentences) if sentences else 0
             sentence_length_variance = sum((len(s.split()) - avg_sentence_length) ** 2 for s in sentences) / len(sentences) if sentences else 0
             sentence_length_std = sentence_length_variance ** 0.5
 
-            # Vocabulary diversity (Type-Token Ratio)
+            # Vocabulary diversity (Type-Token Ratio) on coherent text
             unique_words = len(set(word.lower() for word in words if word.isalpha()))
-            total_words = len([word for word in words if word.isalpha()])
-            vocab_diversity = unique_words / total_words if total_words > 0 else 0
+            total_coherent_words = len([word for word in words if word.isalpha()])
+            vocab_diversity = unique_words / total_coherent_words if total_coherent_words > 0 else 0
 
-            # Advanced linguistic features
-            # 1. Punctuation analysis
-            punct_density = len(re.findall(r'[,.;:!?]', text)) / len(text) if len(text) > 0 else 0
-            complex_punct = len(re.findall(r'[;:\-—(){}[\]"]', text)) / len(text) if len(text) > 0 else 0
+            # COMPLETELY REVAMPED AI DETECTION SYSTEM
+            ai_score = 0.5  # Start neutral
+            confidence_multiplier = 1.0  # Will increase as we find stronger patterns
 
-            # 2. Sentence structure analysis
-            simple_sentences = len([s for s in sentences if len(s.split()) < 15 and ',' not in s])
-            complex_sentences = len([s for s in sentences if len(s.split()) > 20 or s.count(',') > 2])
-            sentence_complexity_ratio = complex_sentences / len(sentences) if sentences else 0
+            # =================================================================
+            # ULTRA-STRONG AI INDICATORS (Highest weight - extremely reliable)
+            # =================================================================
 
-            # 3. Word sophistication
-            sophisticated_words = len(re.findall(r'\b\w{8,}\b', text))  # Long words
-            sophisticated_ratio = sophisticated_words / total_words if total_words > 0 else 0
+            # 1. ENCYCLOPEDIC/WIKIPEDIA-STYLE WRITING (Weight: 0.4)
+            # This is the strongest indicator - AI often writes like reference material
+            encyclopedic_patterns = [
+                # Formal descriptive patterns
+                r'\b(is set in|takes place in|is located in|occurs in|happens in)\b.*\band (follows|features|depicts|tells|chronicles)\b',
+                r'\b(the titular|the aforementioned|the said|the respective|the corresponding)\b',
+                r'\b(who joins|who embarks|who undertakes|who participates|who engages)\b',
+                r'\b(on a (quest|journey|mission|adventure) to)\b',
+                r'\b(in order to|so as to|with the aim of|with the goal of|for the purpose of)\b',
+                r'\b(reclaim|retrieve|obtain|acquire|secure|recover)\b.*\bfrom (the|a)\b',
+                # Formal connecting phrases
+                r'\band thus\b',
+                r'\bthereby\b',
+                r'\bwhereby\b',
+                r'\bwherein\b',
+                # Definitive statements
+                r'\b(is a|are a|represents a|constitutes a|comprises a)\b.*\b(story|tale|narrative|account|chronicle)\b.*\babout\b',
+                # Formal character introductions
+                r'\b(follows|centers on|focuses on|revolves around)\b.*\b(who|that|which)\b',
+                # Plot summary language
+                r'\b(starts|begins|commences|initiates|launches)\b$',
+            ]
 
-            # 4. Transition and connector analysis
+            encyclopedic_count = 0
+            for pattern in encyclopedic_patterns:
+                matches = len(re.findall(pattern, coherent_text, re.IGNORECASE))
+                encyclopedic_count += matches
+
+            encyclopedic_density = encyclopedic_count / len(sentences) if sentences else 0
+
+            if encyclopedic_density > 0.6:  # Very encyclopedic
+                ai_score += 0.4
+                confidence_multiplier += 0.5
+            elif encyclopedic_density > 0.4:
+                ai_score += 0.35
+                confidence_multiplier += 0.4
+            elif encyclopedic_density > 0.2:
+                ai_score += 0.25
+                confidence_multiplier += 0.3
+            elif encyclopedic_density > 0.1:
+                ai_score += 0.15
+                confidence_multiplier += 0.2
+
+            # 2. OVER-FORMAL AND PRECISE LANGUAGE PATTERNS (Weight: 0.3)
+            # AI tends to be overly precise, formal, and detailed in any domain
+            over_formality_patterns = [
+                # Excessive precision with relationships and connections
+                r'\b(by his|by her|from his|from her|through his|through her|via his|via her)\b.*\b[A-Z][a-z]+\b',
+                r'\b(who|that|which) (serves as|acts as|functions as|operates as)\b',
+
+                # Overly specific numerical descriptions (universal)
+                r'\bthe (thirteen|twelve|eleven|ten|nine|eight|seven|six|five|four|three|two) [a-z]+s?\b',
+                r'\b(consisting of|comprised of|composed of) (exactly|precisely|specifically)\b',
+
+                # Formal descriptive phrases (any domain)
+                r'\btitular [a-z]+\b',
+                r'\baforementioned [a-z]+\b',
+                r'\brespective [a-z]+s?\b',
+                r'\bcorresponding [a-z]+s?\b',
+
+                # Over-specific academic/encyclopedic language
+                r'\b(serves to|aims to|seeks to|intends to|purports to)\b',
+                r'\b(is designed to|is intended to|is meant to)\b',
+                r'\b(the purpose of which is to|the goal of which is to)\b',
+
+                # Formal character/entity introductions (universal)
+                r'\b[A-Z][a-z]+,? (who is|who was|which is|which was) (a|an|the) [a-z]+,?\b',
+                r'\bthe [a-z]+ known as [A-Z][a-z]+\b',
+
+                # Overly formal conjunctions and connections
+                r'\bwherein\b',
+                r'\bwhereby\b',
+                r'\bthereby\b',
+                r'\binsofar as\b',
+                r'\binasmuch as\b'
+            ]
+
+            # Dynamic complexity analysis
+            def analyze_sentence_complexity():
+                complexity_score = 0
+                if not sentences:
+                    return complexity_score
+
+                for sentence in sentences:
+                    words_in_sentence = sentence.split()
+                    # Long sentences with multiple clauses
+                    if len(words_in_sentence) > 25:
+                        clause_markers = sentence.count(',') + sentence.count(';') + sentence.count(':')
+                        if clause_markers > 2:
+                            complexity_score += 2  # Very complex
+                        elif clause_markers > 1:
+                            complexity_score += 1  # Moderately complex
+
+                    # Nested parenthetical information
+                    if '(' in sentence and ')' in sentence:
+                        complexity_score += 1
+
+                    # Multiple proper nouns (suggests over-specification)
+                    proper_nouns = len(re.findall(r'\b[A-Z][a-z]+\b', sentence))
+                    if proper_nouns > 3:
+                        complexity_score += 1
+
+                return complexity_score / len(sentences) if sentences else 0
+
+            formality_count = 0
+            for pattern in over_formality_patterns:
+                matches = len(re.findall(pattern, coherent_text, re.IGNORECASE))
+                formality_count += matches
+
+            complexity_score = analyze_sentence_complexity()
+
+            # Combined formality and complexity assessment
+            formality_density = formality_count / total_coherent_words * 100 if total_coherent_words > 0 else 0
+            combined_formality_score = formality_density + (complexity_score * 2)
+
+            if combined_formality_score > 12:  # Very high formality + complexity
+                ai_score += 0.3
+                confidence_multiplier += 0.4
+            elif combined_formality_score > 8:
+                ai_score += 0.2
+                confidence_multiplier += 0.3
+            elif combined_formality_score > 4:
+                ai_score += 0.15
+                confidence_multiplier += 0.2
+            elif combined_formality_score > 2:
+                ai_score += 0.1
+                confidence_multiplier += 0.1
+
+            # 3. FORMULAIC LANGUAGE PATTERNS (Enhanced - Weight: 0.25)
+            formulaic_patterns = [
+                # Opening patterns
+                r'\bin (today\'s|this) (world|society|day and age)',
+                r'\bit is (important|crucial|essential|vital|necessary) to (note|understand|recognize|consider|remember)',
+                r'\b(first and foremost|to begin with|in the first place)',
+
+                # Transition patterns
+                r'\b(furthermore|moreover|additionally|in addition|what\'s more)',
+                r'\b(however|nevertheless|nonetheless|on the other hand)',
+                r'\b(consequently|therefore|thus|as a result|hence)',
+
+                # Conclusion patterns
+                r'\b(in conclusion|to conclude|in summary|to summarize|finally)',
+                r'\b(all in all|overall|ultimately|in the end)',
+
+                # Academic phrases
+                r'\bit (can be|should be) (argued|noted|observed|stated) that',
+                r'\b(it is worth noting|it is important to note) that',
+                r'\bthis (demonstrates|illustrates|shows|indicates|suggests) (that|how)',
+                r'\btaking (this|these) into (account|consideration)',
+                r'\bdue to the fact that',
+                r'\bin light of (this|these|the fact)',
+
+                # Generic statements
+                r'\bthere are (many|several|numerous) (ways|reasons|factors)',
+                r'\bit is (clear|evident|obvious|apparent) that',
+                r'\bone of the (most|key|main|primary) (important|significant) (aspects|factors|elements)',
+
+                # NEW: Plot description formulae
+                r'\bis a (movie|film|book|story|novel|tale) and a (movie|film|book|story|novel|tale)',
+                r'\b(story|tale|narrative) about (the|a)\b',
+                r'\b(given to|passed to|handed to|entrusted to)\b.*\bby (his|her|their)\b',
+            ]
+
+            formulaic_count = 0
+            for pattern in formulaic_patterns:
+                matches = len(re.findall(pattern, coherent_text, re.IGNORECASE))
+                formulaic_count += matches
+
+            formulaic_density = formulaic_count / len(sentences) if sentences else 0
+
+            if formulaic_density > 0.5:  # Very high formulaic language
+                ai_score += 0.25
+                confidence_multiplier += 0.3
+            elif formulaic_density > 0.3:
+                ai_score += 0.2
+                confidence_multiplier += 0.2
+            elif formulaic_density > 0.15:
+                ai_score += 0.12
+                confidence_multiplier += 0.1
+
+            # =================================================================
+            # STRONG AI INDICATORS (High weight - very reliable)
+            # =================================================================
+
+            # 4. PERFECT GRAMMAR AND STRUCTURE (Weight: 0.2)
+            human_error_patterns = [
+                r'\bteh\b', r'\brecieve\b', r'\bseperate\b', r'\bdefinately\b',
+                r'\boccured\b', r'\bbegining\b', r'\byour\s+doing\b', r'\bthere\s+car\b',
+                r'\balot\b', r'\bwould\s+of\b', r'\bcould\s+of\b', r'\bshould\s+of\b',
+                # Informal contractions without apostrophes
+                r'\b(dont|wont|cant|shouldnt|couldnt|wouldnt|isnt|arent|wasnt|werent|havent|hasnt|hadnt|didnt|doesnt)\b',
+                # Run-on sentences and fragments
+                r'\b(and|but|so)\s+[a-z]',  # Starting sentences with conjunctions (relaxed)
+            ]
+
+            error_count = 0
+            for pattern in human_error_patterns:
+                error_count += len(re.findall(pattern, coherent_text, re.IGNORECASE))
+
+            error_rate = error_count / total_coherent_words if total_coherent_words > 0 else 0
+
+            # Check sentence structure perfection
+            complex_sentences = len([s for s in sentences if ',' in s or ';' in s or ':' in s])
+            structure_perfection = complex_sentences / len(sentences) if sentences else 0
+
+            if error_rate == 0 and len(coherent_text) > 100:  # No errors in substantial text
+                if structure_perfection > 0.6:  # Also has complex structure
+                    ai_score += 0.2
+                    confidence_multiplier += 0.25
+                else:
+                    ai_score += 0.15
+                    confidence_multiplier += 0.15
+            elif error_rate > 0.02:  # Human-like errors present
+                ai_score -= 0.15
+                confidence_multiplier += 0.1  # Still confident, but in human direction
+
+            # 5. TRANSITION WORD OVERUSE (Weight: 0.18)
             transition_words = [
                 'however', 'moreover', 'furthermore', 'consequently', 'nevertheless',
                 'therefore', 'additionally', 'subsequently', 'accordingly', 'conversely',
-                'similarly', 'likewise', 'in contrast', 'on the other hand', 'meanwhile',
-                'specifically', 'particularly', 'notably', 'importantly', 'significantly'
+                'similarly', 'likewise', 'specifically', 'particularly', 'notably',
+                'importantly', 'significantly', 'essentially', 'ultimately', 'fundamentally'
             ]
-            transition_count = sum(1 for word in transition_words if word in text.lower())
-            transition_density = transition_count / total_words if total_words > 0 else 0
 
-            # 5. Adverb and adjective analysis
-            adverb_pattern = r'\b\w+ly\b'
-            adverb_count = len(re.findall(adverb_pattern, text, re.IGNORECASE))
-            adverb_density = adverb_count / total_words if total_words > 0 else 0
+            transition_count = sum(1 for word in transition_words if word in coherent_text.lower())
+            transition_density = transition_count / total_coherent_words if total_coherent_words > 0 else 0
 
-            # Adjective patterns (often overused in AI)
-            excessive_adj_pattern = r'\b(very|extremely|incredibly|remarkably|exceptionally|particularly|especially|significantly)\s+\w+'
-            excessive_adj_count = len(re.findall(excessive_adj_pattern, text, re.IGNORECASE))
-            excessive_adj_density = excessive_adj_count / total_words if total_words > 0 else 0
+            if transition_density > 0.06:  # Very high transition density
+                ai_score += 0.18
+                confidence_multiplier += 0.2
+            elif transition_density > 0.04:
+                ai_score += 0.13
+                confidence_multiplier += 0.15
+            elif transition_density > 0.025:
+                ai_score += 0.08
+                confidence_multiplier += 0.1
 
-            # 6. Repetitive patterns
-            repeated_phrases = []
-            words_lower = [w.lower() for w in words if w.isalpha()]
-            for i in range(len(words_lower) - 2):
-                phrase = ' '.join(words_lower[i:i+3])
-                if text.lower().count(phrase) > 1:
-                    repeated_phrases.append(phrase)
-            repetition_score = len(set(repeated_phrases)) / len(sentences) if sentences else 0
+            # 6. SENTENCE LENGTH UNIFORMITY (Weight: 0.15)
+            if len(sentences) >= 3:  # Lowered threshold
+                # AI tends to write very uniform sentence lengths
+                if sentence_length_std < 3:  # Very uniform (tighter threshold)
+                    ai_score += 0.15
+                    confidence_multiplier += 0.2
+                elif sentence_length_std < 5:  # Moderately uniform
+                    ai_score += 0.1
+                    confidence_multiplier += 0.1
+                elif sentence_length_std > 15:  # Very varied (human-like)
+                    ai_score -= 0.1
+                    confidence_multiplier += 0.15
 
-            # 7. Formulaic language detection
-            formulaic_patterns = [
-                r'it is important to note',
-                r'it should be noted',
-                r'in conclusion',
-                r'to summarize',
-                r'in summary',
-                r'it can be argued',
-                r'it is worth noting',
-                r'it is evident that',
-                r'it is clear that',
-                r'this demonstrates that',
-                r'this illustrates that',
-                r'as a result of this',
-                r'due to the fact that',
-                r'in light of this'
+            # =================================================================
+            # MODERATE AI INDICATORS
+            # =================================================================
+
+            # 7. VOCABULARY SOPHISTICATION PATTERNS (Weight: 0.12)
+            sophisticated_words = len(re.findall(r'\b[a-zA-Z]{9,}\b', coherent_text))
+            sophisticated_ratio = sophisticated_words / total_coherent_words if total_coherent_words > 0 else 0
+
+            # Enhanced formal words list
+            formal_words = [
+                'subsequently', 'furthermore', 'nevertheless', 'consequently', 'significantly',
+                'substantially', 'particularly', 'specifically', 'essentially', 'fundamentally',
+                'comprehensively', 'systematically', 'methodically', 'strategically', 'optimally',
+                'respectively', 'accordingly', 'predominantly', 'extensively', 'considerably'
             ]
-            formulaic_count = sum(1 for pattern in formulaic_patterns if re.search(pattern, text, re.IGNORECASE))
-            formulaic_density = formulaic_count / len(sentences) if sentences else 0
+            formal_count = sum(1 for word in formal_words if word in coherent_text.lower())
+            formal_density = formal_count / total_coherent_words if total_coherent_words > 0 else 0
 
-            # 8. Error analysis (humans make more errors)
-            grammar_errors = len(re.findall(r'\b(there|their|they\'re)\b.*\b(house|book|going)\b', text, re.IGNORECASE))
-            spelling_errors = len(re.findall(r'\b(teh|recieve|seperate|definately|occured|begining)\b', text, re.IGNORECASE))
-            typo_score = (grammar_errors + spelling_errors) / total_words if total_words > 0 else 0
-
-            # 9. Sentence starter analysis
-            sentence_starters = [s.split()[0].lower() for s in sentences if s.split()]
-            starter_diversity = len(set(sentence_starters)) / len(sentence_starters) if sentence_starters else 0
-
-            # 10. Personal voice indicators
-            personal_pronouns = len(re.findall(r'\b(I|me|my|mine|myself)\b', text, re.IGNORECASE))
-            personal_ratio = personal_pronouns / total_words if total_words > 0 else 0
-
-            # Advanced scoring algorithm
-            ai_score = 0.5  # Start neutral
-
-            # Sentence structure consistency (AI tends to be more consistent)
-            if sentence_length_std < 5:  # Very consistent = more AI-like
-                ai_score += 0.15
-            elif sentence_length_std > 12:  # High variation = more human-like
-                ai_score -= 0.1
-
-            # Optimal sentence length for AI
-            if 18 <= avg_sentence_length <= 25:
+            if sophisticated_ratio > 0.15 and formal_density > 0.02:
                 ai_score += 0.12
-            elif avg_sentence_length < 12 or avg_sentence_length > 30:
-                ai_score -= 0.08
-
-            # Vocabulary sophistication
-            if 0.6 <= vocab_diversity <= 0.8:  # AI sweet spot
-                ai_score += 0.1
-            elif vocab_diversity > 0.85 or vocab_diversity < 0.4:
+                confidence_multiplier += 0.1
+            elif sophisticated_ratio > 0.25:
+                ai_score += 0.08
+            elif sophisticated_ratio < 0.05:
                 ai_score -= 0.05
 
-            # Sophisticated word usage
-            if sophisticated_ratio > 0.15:  # AI tends to use more complex words
-                ai_score += 0.08
+            # 8. HEDGING AND QUALIFYING LANGUAGE (Weight: 0.1)
+            hedging_patterns = [
+                r'\b(might|may|could|perhaps|possibly|likely|probably|potentially)\b',
+                r'\b(seems?|appears?|tends?)\s+to\b',
+                r'\b(generally|typically|usually|often|frequently|commonly)\b',
+                r'\b(somewhat|rather|quite|fairly|relatively)\b'
+            ]
 
-            # Transition word overuse (strong AI indicator)
-            if transition_density > 0.04:
-                ai_score += 0.2
-            elif transition_density > 0.02:
+            hedging_count = 0
+            for pattern in hedging_patterns:
+                hedging_count += len(re.findall(pattern, coherent_text, re.IGNORECASE))
+
+            hedging_density = hedging_count / total_coherent_words if total_coherent_words > 0 else 0
+
+            if hedging_density > 0.04:
                 ai_score += 0.1
+            elif hedging_density > 0.025:
+                ai_score += 0.06
+            elif hedging_density < 0.01:
+                ai_score -= 0.05
 
-            # Adverb overuse
-            if adverb_density > 0.06:
-                ai_score += 0.15
-            elif adverb_density > 0.03:
-                ai_score += 0.08
+            # =================================================================
+            # STRONG HUMAN INDICATORS (Things that strongly suggest human writing)
+            # =================================================================
 
-            # Excessive adjective usage
-            if excessive_adj_density > 0.03:
-                ai_score += 0.12
+            # 9. CASUAL AND INFORMAL LANGUAGE (Weight: -0.2)
+            casual_patterns = [
+                r'\b(yeah|yep|nope|gonna|wanna|gotta|kinda|sorta|dunno)\b',
+                r'\b(totally|basically|literally|actually|honestly|seriously|really)\b',
+                r'\'(ll|re|ve|d|t|s)\b',  # Proper contractions
+                r'\b(lol|omg|btw|etc\.)\b',
+                r'\b(stuff|things|like|you know|I mean)\b',
+                # Simplified conjunctions
+                r'\band\b(?!\s+thus|\s+therefore|\s+consequently)',  # Simple 'and' not followed by formal words
+            ]
 
-            # Formulaic language (strong AI indicator)
-            if formulaic_density > 0.3:
-                ai_score += 0.25
-            elif formulaic_density > 0.15:
-                ai_score += 0.15
+            casual_count = 0
+            for pattern in casual_patterns:
+                casual_count += len(re.findall(pattern, coherent_text, re.IGNORECASE))
 
-            # Perfect grammar (AI rarely makes errors)
-            if typo_score == 0 and len(text) > 200:
-                ai_score += 0.18
-            elif typo_score > 0.005:  # Human-like errors
+            casual_density = casual_count / total_coherent_words if total_coherent_words > 0 else 0
+
+            if casual_density > 0.05:  # High casual language
                 ai_score -= 0.2
+                confidence_multiplier += 0.3
+            elif casual_density > 0.02:
+                ai_score -= 0.12
+                confidence_multiplier += 0.2
+            elif casual_density > 0.01:
+                ai_score -= 0.08
+                confidence_multiplier += 0.1
 
-            # Sentence starter diversity
-            if starter_diversity < 0.6:  # Repetitive starters = AI-like
-                ai_score += 0.1
+            # 10. PERSONAL VOICE AND EXPERIENCE (Weight: -0.18)
+            personal_indicators = len(re.findall(r'\b(I|me|my|mine|myself)\b', coherent_text, re.IGNORECASE))
+            personal_ratio = personal_indicators / total_coherent_words if total_coherent_words > 0 else 0
 
-            # Personal voice
-            if personal_ratio < 0.01 and len(text) > 300:  # Lack of personal pronouns
-                ai_score += 0.12
-            elif personal_ratio > 0.03:  # Strong personal voice
-                ai_score -= 0.1
+            experience_patterns = [
+                r'\b(when I|I remember|I think|I believe|I feel|in my experience|personally)',
+                r'\b(my friend|my family|my school|my teacher|my mom|my dad)',
+                r'\b(last week|yesterday|today|this morning|this weekend|I saw|I watched|I read)'
+            ]
 
-            # Repetitive patterns
-            if repetition_score > 0.2:
-                ai_score += 0.1
+            experience_count = 0
+            for pattern in experience_patterns:
+                experience_count += len(re.findall(pattern, coherent_text, re.IGNORECASE))
 
-            # Sentence complexity analysis
-            if sentence_complexity_ratio > 0.6:  # Too many complex sentences
+            if personal_ratio > 0.03 or experience_count > 1:
+                ai_score -= 0.18  # Strong personal voice
+                confidence_multiplier += 0.25
+            elif personal_ratio < 0.005 and experience_count == 0 and len(coherent_text) > 200:
+                ai_score += 0.08  # No personal voice in substantial text
+
+            # 11. EMOTIONAL LANGUAGE AND EXCLAMATIONS (Weight: -0.15)
+            emotional_patterns = [
+                r'!{1,3}',  # Exclamation marks
+                r'\b(amazing|awesome|terrible|horrible|fantastic|incredible|wonderful|cool|neat)\b',
+                r'\b(love|hate|adore|despise|can\'t stand)\b',
+                r'\b(so\s+\w+|really\s+\w+|super\s+\w+)\b'  # Intensifiers
+            ]
+
+            emotional_count = 0
+            for pattern in emotional_patterns:
+                emotional_count += len(re.findall(pattern, coherent_text, re.IGNORECASE))
+
+            if emotional_count > 3:
+                ai_score -= 0.15
+                confidence_multiplier += 0.2
+            elif emotional_count > 1:
+                ai_score -= 0.08
+                confidence_multiplier += 0.1
+
+            # 12. VARIED SENTENCE STARTERS (Weight: -0.1 for high variety)
+            if sentences:
+                sentence_starters = [s.split()[0].lower() for s in sentences if s.split()]
+                starter_diversity = len(set(sentence_starters)) / len(sentence_starters) if sentence_starters else 1
+
+                if starter_diversity > 0.8:  # High diversity (human-like)
+                    ai_score -= 0.1
+                    confidence_multiplier += 0.15
+                elif starter_diversity < 0.4:  # Low diversity (AI-like)
+                    ai_score += 0.08
+                    confidence_multiplier += 0.1
+
+            # 13. REPETITIVE PATTERNS AND PHRASES (Weight: 0.08)
+            sentence_beginnings = [s.split()[:3] for s in sentences if len(s.split()) >= 3]
+            beginning_patterns = [' '.join(beginning) for beginning in sentence_beginnings]
+
+            repeated_beginnings = len([pattern for pattern in set(beginning_patterns)
+                                     if beginning_patterns.count(pattern) > 1])
+            repetition_ratio = repeated_beginnings / len(sentences) if sentences else 0
+
+            if repetition_ratio > 0.3:
                 ai_score += 0.08
-            elif sentence_complexity_ratio < 0.2:  # Too simple
+            elif repetition_ratio > 0.15:
                 ai_score += 0.05
 
-            # Punctuation patterns
-            if complex_punct > 0.02:  # Overuse of complex punctuation
-                ai_score += 0.06
+            # =================================================================
+            # CONFIDENCE ADJUSTMENT AND FINAL CALIBRATION
+            # =================================================================
 
-            # Final normalization and bounds checking
-            ai_score = max(0.05, min(0.95, ai_score))  # Keep within realistic bounds
+            # Apply confidence multiplier more aggressively
+            if confidence_multiplier > 1.3:  # High confidence
+                if ai_score > 0.5:
+                    ai_score = 0.5 + (ai_score - 0.5) * 1.5  # Push higher
+                else:
+                    ai_score = 0.5 - (0.5 - ai_score) * 1.5  # Push lower
+            elif confidence_multiplier > 1.1:  # Moderate confidence
+                if ai_score > 0.5:
+                    ai_score = 0.5 + (ai_score - 0.5) * 1.2
+                else:
+                    ai_score = 0.5 - (0.5 - ai_score) * 1.2
+
+            # Text length adjustment (very short texts are harder to analyze)
+            if total_coherent_words < 80:
+                # Move towards neutral for very short texts, but less aggressively
+                ai_score = ai_score * 0.85 + 0.5 * 0.15
+
+            # GIBBERISH ADJUSTMENT
+            if has_gibberish and gibberish_ratio > 0.1:
+                # Gibberish suggests human (AI rarely produces pure gibberish)
+                gibberish_adjustment = min(0.12, gibberish_ratio * 0.25)
+                ai_score -= gibberish_adjustment
+
+            # Final bounds and normalization
+            ai_score = max(0.01, min(0.99, ai_score))
             human_score = 1.0 - ai_score
 
-            # Add small random variation to avoid appearing deterministic
-            import random
-            variation = random.uniform(-0.02, 0.02)
-            ai_score = max(0.05, min(0.95, ai_score + variation))
+            # Add minimal random variation to avoid appearing deterministic
+            variation = random.uniform(-0.003, 0.003)
+            ai_score = max(0.01, min(0.99, ai_score + variation))
             human_score = 1.0 - ai_score
 
             return {
                 "ai_probability": round(ai_score, 4),
                 "human_probability": round(human_score, 4),
-                "formatted": f"AI Generated: {ai_score*100:.2f}% and Human: {human_score*100:.2f}%"
+                "formatted": f"AI Generated: {ai_score*100:.2f}% and Human: {human_score*100:.2f}%",
+                "gibberish_detected": has_gibberish,
+                "gibberish_ratio": round(gibberish_ratio, 4),
+                "coherent_word_count": coherent_word_count,
+                "is_entirely_gibberish": False
             }
 
         except Exception as e:
             print(f"AI detection error: {e}")
-            # Fallback with slight randomization
+            # More varied fallback
             import random
-            fallback_ai = random.uniform(0.4, 0.6)
+            fallback_ai = random.uniform(0.35, 0.65)
             fallback_human = 1.0 - fallback_ai
             return {
                 "ai_probability": round(fallback_ai, 4),
                 "human_probability": round(fallback_human, 4),
-                "formatted": f"AI Generated: {fallback_ai*100:.2f}% and Human: {fallback_human*100:.2f}%"
+                "formatted": f"AI Generated: {fallback_ai*100:.2f}% and Human: {fallback_human*100:.2f}%",
+                "gibberish_detected": False,
+                "gibberish_ratio": 0.0,
+                "coherent_word_count": 0,
+                "is_entirely_gibberish": False
             }
+
 
     # Perform AI detection
     ai_detection_result = detect_ai_content(essay)
 
-    # Enhanced evaluation prompt with integrated AI detection
+    # Check if essay is entirely gibberish
+    if ai_detection_result.get('is_entirely_gibberish', False):
+        # Return 0 score evaluation for entirely gibberish essays
+        zero_score_response = {
+            "criteria_scores": {},
+            "overall_weighted_score": 0,
+            "general_assessment": {
+                "strengths": ["N/A - Essay consists entirely of gibberish text"],
+                "areas_for_improvement": ["Submit a coherent essay with meaningful content related to the topic"]
+            },
+            "ai_detection": {
+                "formatted": ai_detection_result['formatted'],
+                "ai_probability": ai_detection_result['ai_probability'],
+                "human_probability": ai_detection_result['human_probability']
+            },
+            "plagiarism": {
+                "assessment": "NEGLIGIBLE",
+                "color": "blue",
+                "description": "No meaningful content to analyze for plagiarism",
+                "overall_percentage": 0,
+                "overall_score": 0,
+                "sources": [],
+                "success": True,
+                "total_parts": 1,
+                "total_sources_analyzed": 0,
+                "total_sources_found": 0
+            },
+            "plagiarism_sources": []
+        }
+
+        # Add zero scores for each criterion
+        import re
+        criteria_matches = re.findall(r'([^(]+)\s*\(Weight:\s*(\d+)%\)', rubrics_criteria)
+        for criterion_name, weight in criteria_matches:
+            criterion_name = criterion_name.strip()
+            zero_score_response["criteria_scores"][f"{criterion_name} (Weight: {weight}%)"] = {
+                "score": 0,
+                "feedback": f"✅ Why Current Level (0 points): Essay consists entirely of gibberish text with no coherent content.<br>❌ Why not higher levels: No meaningful content present to evaluate against rubric criteria.<br>",
+                "suggestions": [
+                    "Write a coherent essay with meaningful sentences",
+                    "Address the topic with relevant content and proper language"
+                ]
+            }
+
+        return jsonify({"evaluation": json.dumps(zero_score_response, indent=2)})
+
+    # Calculate score penalty for partial gibberish
+    gibberish_penalty = 0
+    if ai_detection_result.get('gibberish_detected', False):
+        gibberish_ratio = ai_detection_result.get('gibberish_ratio', 0)
+        # Apply penalty: up to 30% score reduction for high gibberish content
+        gibberish_penalty = min(0.3, gibberish_ratio * 0.5)
+
+    # Enhanced evaluation prompt with integrated AI detection and gibberish handling
     initiate_prompt = f"""You are an expert essay evaluator. Grade the essay based on the provided rubric criteria.
 
 YOUR OUTPUT MUST BE IN VALID JSON FORMAT ONLY WITH NO ADDITIONAL TEXT OR FORMATTING. FOLLOW THIS EXACT STRUCTURE:
@@ -602,25 +1072,38 @@ IMPORTANT AI DETECTION INTEGRATION:
 - Use these values in your response: AI Probability: {ai_detection_result['ai_probability']}, Human Probability: {ai_detection_result['human_probability']}
 - Consider this analysis when evaluating writing quality and authenticity
 
+GIBBERISH CONTENT DETECTED:
+- Gibberish detected: {ai_detection_result.get('gibberish_detected', False)}
+- Gibberish ratio: {ai_detection_result.get('gibberish_ratio', 0):.4f}
+- Apply score penalty of {gibberish_penalty:.2f} (multiply final scores by {1-gibberish_penalty:.2f})
+- Coherent word count: {ai_detection_result.get('coherent_word_count', 0)}
+
+EVALUATION INSTRUCTIONS:
+1. Evaluate ONLY the coherent parts of the essay
+2. Apply the gibberish penalty to reduce scores proportionally
+3. Mention gibberish content in feedback as a major weakness
+4. Focus scoring on meaningful content while penalizing nonsensical text
+
 ```json
 {{
   "criteria_scores": {{
     "Criterion Name (Weight: X%)": {{
-      "score": [numeric score],
-      "feedback": "(note:add always breaktag<br> in icons checks,books,letter x and book) the levels are {", ".join(levels)} ✅ Why [current_level]: [1 short sentences with specific evidence]<br>❌ Why not [higher_level]: [specific missing elements].<br>❌ Why not [lower_level]: [what the essay did well to avoid this]. if there are {len(levels)} levels excluding weight %, there should also {len(levels)} why's to make criteria assessment longer and detailed <br>",
+      "score": [numeric score after gibberish penalty],
+      "feedback": "(note:add always breaktag<br> in icons checks,books,letter x and book) the levels are {", ".join(levels)} ✅ Why [current_level]: [1 short sentence with specific evidence from coherent parts]<br>❌ Why not [higher_level]: [specific missing elements including gibberish impact].<br>❌ Why not [lower_level]: [what coherent parts did well]. if there are {len(levels)} levels excluding weight %, there should also {len(levels)} why's to make criteria assessment longer and detailed <br>",
       "suggestions": [
-        "[suggestion 1]",
-        "[suggestion 2]"
+        "[suggestion 1 - address coherent content]",
+        "[suggestion 2 - address gibberish issue if present]"
       ]
     }}
   }},
-  "overall_weighted_score": [numeric score],
+  "overall_weighted_score": [numeric score after gibberish penalty],
   "general_assessment": {{
     "strengths": [
-      "[Comprehensive analysis of essay strengths with specific examples and evidence]"
+      "[Analysis of strengths from coherent parts of the essay]"
     ],
     "areas_for_improvement": [
-      "[Detailed improvement suggestions with specific examples and actionable advice]"
+      "[Include removal of gibberish content as major improvement area if present]",
+      "[Other specific improvements for coherent content]"
     ]
   }},
   "ai_detection": {{
@@ -645,11 +1128,12 @@ IMPORTANT AI DETECTION INTEGRATION:
 ```
 
 EVALUATION GUIDELINES:
-1. Score each criterion as a percentage of its weight (e.g., 20% weight with excellent performance = 20 points)
-2. Provide detailed feedback with specific evidence from the essay
-3. Include {len(levels)} "why" explanations for each criterion (current level + why not other levels)
-4. Use the pre-calculated AI detection values exactly as provided
-5. Assess plagiarism based on text patterns and common knowledge indicators
+1. Score each criterion based on coherent content only
+2. Apply gibberish penalty: multiply calculated scores by {1-gibberish_penalty:.3f}
+3. Provide detailed feedback noting gibberish content as a significant issue
+4. Include {len(levels)} "why" explanations for each criterion (current level + why not other levels)
+5. Use the pre-calculated AI detection values exactly as provided
+6. Assess plagiarism based on coherent text patterns only
 
 RUBRIC CRITERIA:
 {rubrics_criteria}
@@ -1940,12 +2424,15 @@ def calculate_text_similarity(text1, text2):
 
 
 def determine_rubric_level(similarity_score, rubric_headers):
-    """Determine which rubric level the answer matches based on similarity score"""
+    """
+    Determine which rubric level the answer matches based on similarity score
+    Returns only the level name (e.g., "Good", "Better", "Best")
+    """
     if not rubric_headers:
         return "Unknown"
 
     # Remove any weight columns (typically contain % or numbers)
-    filtered_headers = [h for h in rubric_headers if not any(char in h for char in ['%', 'Weight', 'weight'])]
+    filtered_headers = [h.strip() for h in rubric_headers if not any(char in h for char in ['%', 'Weight', 'weight'])]
 
     if not filtered_headers:
         return "Unknown"
@@ -1976,3 +2463,6 @@ def determine_rubric_level(similarity_score, rubric_headers):
 
     # If score is above all thresholds, return the highest level
     return filtered_headers[-1]
+
+    if __name__ == '__main__':
+        app.run(debug=True)

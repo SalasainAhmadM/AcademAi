@@ -311,7 +311,7 @@ require_once '../include/new-academai-sidebar.php';
             if (trimmed.length === 0) return false;
 
             // Check for minimum length (at least 2 characters)
-            if (trimmed.length < 2) return false;
+            if (trimmed.length < 10) return false;
 
             // Check if text contains at least one letter
             if (!/[a-zA-Z]/.test(trimmed)) return false;
@@ -333,7 +333,7 @@ require_once '../include/new-academai-sidebar.php';
 
             // Check for minimum word count (at least 2 words for descriptions)
             const words = trimmed.split(/\s+/).filter(word => word.length > 0);
-            if (words.length < 2) return false;
+            if (words.length < 10) return false;
 
             // Check if it's a meaningful sentence (not just repeated characters)
             if (/^(.)\1*$/.test(trimmed.replace(/\s/g, ''))) return false;

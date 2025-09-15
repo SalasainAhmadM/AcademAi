@@ -36,7 +36,7 @@ if (isset($data['column_count']) && is_numeric($data['column_count'])) {
 }
 
 // Set up cURL request to the Flask API
-$ch = curl_init('https://olraceirdna.pythonanywhere.com/autogenerate');
+$ch = curl_init('https://kaizokuDev.pythonanywhere.com/autogenerate');
 curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
 curl_setopt($ch, CURLOPT_POST, true);
 curl_setopt($ch, CURLOPT_POSTFIELDS, json_encode($data));
@@ -70,7 +70,7 @@ if (json_last_error() !== JSON_ERROR_NONE) {
             exit;
         }
     }
-    
+
     // If extraction failed too, return original response
     http_response_code($statusCode);
     echo $response;

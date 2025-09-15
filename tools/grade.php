@@ -16,7 +16,7 @@ class EssayEvaluator
   /**
    * Detect AI-generated content in essay
    */
-  public function detectAIContent($essay, $apiUrl = 'https://olraceirdna.pythonanywhere.com/analyze')
+  public function detectAIContent($essay, $apiUrl = 'https://kaizokuDev.pythonanywhere.com/analyze')
   {
     // Validate input
     if (empty($essay) || str_word_count($essay) < 20) {
@@ -171,7 +171,7 @@ class EssayEvaluator
   /**
    * Compare student answer with reference answer using rubrics
    */
-  public function compareAnswer($studentAnswer, $referenceAnswer, $rubricData, $question, $apiUrl = 'https://olraceirdna.pythonanywhere.com/compare')
+  public function compareAnswer($studentAnswer, $referenceAnswer, $rubricData, $question, $apiUrl = 'https://kaizokuDev.pythonanywhere.com/compare')
   {
     // Validate inputs
     if (empty($studentAnswer)) {
@@ -636,7 +636,7 @@ strictly follow the format of example output:
   /**
    * Call evaluation API
    */
-  public function callEvaluationAPI($data, $url = 'https://olraceirdna.pythonanywhere.com/evaluate')
+  public function callEvaluationAPI($data, $url = 'https://kaizokuDev.pythonanywhere.com/evaluate')
   {
     $ch = curl_init($url);
     if (!$ch) {
@@ -680,7 +680,7 @@ strictly follow the format of example output:
   /**
    * Process all essays for evaluation
    */
-  public function callBenchmarkAPI($studentEssay, $referenceAnswer, $rubricCriteria, $question, $url = 'https://olraceirdna.pythonanywhere.com/benchmark')
+  public function callBenchmarkAPI($studentEssay, $referenceAnswer, $rubricCriteria, $question, $url = 'https://kaizokuDev.pythonanywhere.com/benchmark')
   {
     // Validate inputs
     if (empty($studentEssay) || empty($referenceAnswer)) {
@@ -812,9 +812,9 @@ strictly follow the format of example output:
     }
 
     $allResults = [];
-    $api2Url = 'https://olraceirdna.pythonanywhere.com/check_plagiarism';
-    $benchmarkUrl = 'https://olraceirdna.pythonanywhere.com/benchmark';
-    $compareUrl = 'https://olraceirdna.pythonanywhere.com/compare';
+    $api2Url = 'https://kaizokuDev.pythonanywhere.com/check_plagiarism';
+    $benchmarkUrl = 'https://kaizokuDev.pythonanywhere.com/benchmark';
+    $compareUrl = 'https://kaizokuDev.pythonanywhere.com/compare';
     $googleApiKey = null;
     $googleCx = null;
 
