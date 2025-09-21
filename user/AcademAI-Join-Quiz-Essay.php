@@ -1125,7 +1125,7 @@ if (!$userDetails) {
                                         <textarea id="answeressay_<?php echo $index; ?>" name="answer_<?php echo $index; ?>"
                                             placeholder="Type your answer here..."
                                             oninput="validateWordCount(this, <?php echo $question['min_words']; ?>, <?php echo $question['max_words']; ?>, <?php echo $index; ?>); handleTextareaInput(this, <?php echo $index; ?>);">
-                                                                                                                                                                                                                                </textarea>
+                                                                                                                                                                                                                                                        </textarea>
 
                                         <p id="wordCount_<?php echo $index; ?>" class="word-count">Words: 0 /
                                             <?php echo $question['max_words']; ?>
@@ -2808,6 +2808,10 @@ if (!$userDetails) {
             const endTime = new Date("<?php echo $endDateTime->format('Y-m-d H:i:s'); ?>");
             const isRestricted = <?php echo $quizDetails['is_active'] == 1 ? 'true' : 'false'; ?>;
 
+            // Check for 'invalid' parameter in URL
+            const urlParams = new URLSearchParams(window.location.search);
+            const hasInvalidParam = urlParams.has('invalid');
+
             function updateCountdown() {
                 const now = new Date();
                 const diff = endTime - now;
@@ -3121,6 +3125,8 @@ if (!$userDetails) {
     unset($_SESSION['already_submitted']); // Clear the flag
     endif;
     ?>
+
+    <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
 </body>
 
 </html>

@@ -224,7 +224,7 @@ try {
                         }).then((result) => {
                             if (result.isConfirmed) {
                                 // Redirect back to the quiz page
-                                window.location.href = '../user/AcademAI-Join-Quiz-Essay.php?quiz_id=<?= $quiz_id ?>?invalid';
+                                window.location.href = '../user/AcademAI-Join-Quiz-Essay.php?quiz_id=<?= $quiz_id ?>';
                             }
                         });
                     </script>
@@ -340,7 +340,28 @@ try {
 
         $pdo->commit();
         $quiz_id = $_GET["quiz_id"];
-        header("Location:grade.php?quiz_id=$quiz_id");
+
+        // Show success message and redirect to grading
+        echo "<script>
+            document.addEventListener('DOMContentLoaded', function() {
+                Swal.fire({
+                    icon: 'success',
+                    title: 'Success!',
+                    text: 'Your answers have been submitted successfully and are being evaluated.',
+                    confirmButtonText: 'Generate Results',
+                    confirmButtonColor: '#092635',
+                    allowOutsideClick: false,
+                    allowEscapeKey: false
+                }).then((result) => {
+                    if (result.isConfirmed) {
+                        window.location.href = 'grade.php?quiz_id=$quiz_id';
+                    }
+                });
+            });
+        </script>";
+
+        // Include SweetAlert2 if not already included
+        echo '<script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>';
     }
 
 } catch (PDOException $e) {
