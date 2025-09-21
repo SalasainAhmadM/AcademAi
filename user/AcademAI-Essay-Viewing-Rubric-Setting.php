@@ -300,108 +300,68 @@ require_once '../include/new-academai-sidebar.php';
 
 
     <script>
-        // Add this validation script to your existing JavaScript code
-
-        // Validation functions
         function isValidText(text) {
             if (!text || typeof text !== 'string') return false;
-
-            // Remove extra whitespace and check if empty
             const trimmed = text.trim();
-            if (trimmed.length === 0) return false;
-
-            // Check for minimum length (at least 2 characters)
-            if (trimmed.length < 10) return false;
-
-            // Check if text contains at least one letter
-            if (!/[a-zA-Z]/.test(trimmed)) return false;
-
-            // Check if text is not just numbers or special characters
-            if (/^[\d\s\W]+$/.test(trimmed)) return false;
-
-            // Check for common placeholder text
-            const placeholders = ['xxx', 'test', 'sample', 'placeholder', 'temp'];
-            if (placeholders.includes(trimmed.toLowerCase())) return false;
-
-            return true;
+            return trimmed.length > 0; // Just check it's not empty
         }
 
         function isValidSentence(text) {
-            if (!isValidText(text)) return false;
-
+            if (!text || typeof text !== 'string') return false;
             const trimmed = text.trim();
-
-            // Check for minimum word count (at least 2 words for descriptions)
-            const words = trimmed.split(/\s+/).filter(word => word.length > 0);
-            if (words.length < 10) return false;
-
-            // Check if it's a meaningful sentence (not just repeated characters)
-            if (/^(.)\1*$/.test(trimmed.replace(/\s/g, ''))) return false;
-
-            return true;
+            return trimmed.length > 0; // Just check it's not empty
         }
 
         function validateRubricContent() {
             let isValid = true;
             const errors = [];
 
-            // Get all criteria inputs
+            // Get all criteria inputs - just check they're not empty
             const criteriaInputs = document.querySelectorAll('#rubricsTable tbody tr td:first-child input');
             criteriaInputs.forEach((input, index) => {
-                if (!isValidText(input.value)) {
+                if (!input.value.trim()) {
                     isValid = false;
                     input.style.borderColor = '#dc3545';
-                    input.title = 'Please enter a valid criteria name';
-                    errors.push(`Row ${index + 1}: Invalid criteria name`);
+                    input.title = 'Please enter a criteria name';
+                    errors.push(`Row ${index + 1}: Empty criteria name`);
                 } else {
                     input.style.borderColor = '';
                     input.title = '';
                 }
             });
 
-            // Get all description textareas (excluding weight column)
+            // Get all description textareas - just check they're not empty
             const descriptionTextareas = document.querySelectorAll('#rubricsTable tbody tr td:not(:first-child):not(:last-child) textarea');
             descriptionTextareas.forEach((textarea, index) => {
-                if (!isValidSentence(textarea.value)) {
+                if (!textarea.value.trim()) {
                     isValid = false;
                     textarea.style.borderColor = '#dc3545';
-                    textarea.title = 'Please enter a meaningful description (at least 2 words)';
-                    errors.push(`Cell ${index + 1}: Invalid description`);
+                    textarea.title = 'Please enter a description';
+                    errors.push(`Cell ${index + 1}: Empty description`);
                 } else {
                     textarea.style.borderColor = '';
                     textarea.title = '';
                 }
             });
 
-            // Check weights
+            // Check weights - allow any positive number, don't require 100% total
             const weightInputs = document.querySelectorAll('#rubricsTable tbody tr td:last-child input');
-            let totalWeight = 0;
             weightInputs.forEach((input, index) => {
                 const weight = parseFloat(input.value);
                 if (isNaN(weight) || weight < 0) {
                     isValid = false;
                     input.style.borderColor = '#dc3545';
-                    input.title = 'Please enter a valid weight percentage';
+                    input.title = 'Please enter a valid weight (positive number)';
                     errors.push(`Row ${index + 1}: Invalid weight`);
                 } else {
                     input.style.borderColor = '';
                     input.title = '';
-                    totalWeight += weight;
                 }
             });
 
-            // Check if total weight is 100%
-            if (Math.abs(totalWeight - 100) > 0.01) {
-                isValid = false;
-                weightInputs.forEach(input => {
-                    input.style.borderColor = '#dc3545';
-                    input.title = `Total weight must be 100% (current: ${totalWeight.toFixed(2)}%)`;
-                });
-                errors.push(`Total weight must be 100% (current: ${totalWeight.toFixed(2)}%)`);
-            }
-
             return { isValid, errors };
         }
+
 
         function updateSaveButtonState() {
             const saveButton = document.getElementById('saveNewBtn');
@@ -420,17 +380,17 @@ require_once '../include/new-academai-sidebar.php';
             }
         }
 
-        // Enhanced save function with validation
+        // Enhanced save function with minimal validation
         function saveNewRubricWithValidation() {
             const validation = validateRubricContent();
 
             if (!validation.isValid) {
                 Swal.fire({
-                    icon: 'error',
-                    title: 'Validation Errors',
-                    html: '<div style="text-align: left;"><strong>Please fix the following issues:</strong><br>' +
+                    icon: 'warning',
+                    title: 'Please Complete Required Fields',
+                    html: '<div style="text-align: left;"><strong>Please fill in:</strong><br>' +
                         validation.errors.map(error => `• ${error}`).join('<br>') + '</div>',
-                    confirmButtonText: 'Fix Issues'
+                    confirmButtonText: 'OK'
                 });
                 return;
             }
@@ -438,18 +398,17 @@ require_once '../include/new-academai-sidebar.php';
             // If validation passes, proceed with normal save
             saveNewRubric();
         }
-
         // Enhanced confirm save with validation
         function confirmSaveRubricWithValidation() {
             const validation = validateRubricContent();
 
             if (!validation.isValid) {
                 Swal.fire({
-                    icon: 'error',
-                    title: 'Cannot Save Rubric',
-                    html: '<div style="text-align: left;"><strong>Please fix the following issues:</strong><br>' +
+                    icon: 'warning',
+                    title: 'Please Complete Required Fields',
+                    html: '<div style="text-align: left;"><strong>Please fill in:</strong><br>' +
                         validation.errors.map(error => `• ${error}`).join('<br>') + '</div>',
-                    confirmButtonText: 'Fix Issues'
+                    confirmButtonText: 'OK'
                 });
                 return;
             }
@@ -457,21 +416,12 @@ require_once '../include/new-academai-sidebar.php';
             const title = document.getElementById('rubricTitle').value.trim();
             const description = document.getElementById('rubricDescription').value.trim();
 
-            // Check modal fields
-            if (!isValidText(title)) {
+            // Very minimal validation for modal fields
+            if (!title) {
                 Swal.fire({
                     icon: 'warning',
-                    title: 'Invalid Title',
-                    text: 'Please enter a valid rubric title.'
-                });
-                return;
-            }
-
-            if (!isValidSentence(description)) {
-                Swal.fire({
-                    icon: 'warning',
-                    title: 'Invalid Description',
-                    text: 'Please enter a meaningful description (at least 2 words).'
+                    title: 'Title Required',
+                    text: 'Please enter a title for your rubric.'
                 });
                 return;
             }
@@ -782,15 +732,7 @@ require_once '../include/new-academai-sidebar.php';
 
         // Add new row
         function addRow() {
-            if (initialRows.length >= 8) {
-                Swal.fire({
-                    icon: 'error',
-                    title: 'Limit Reached',
-                    text: 'You cannot add more than 8 rows.'
-                });
-                return;
-            }
-
+            // Remove the 8 row limit
             const newRow = {
                 criteria: "New Criteria",
                 cells: []
@@ -809,6 +751,7 @@ require_once '../include/new-academai-sidebar.php';
             addTableRow(newRow, initialRows.length - 1);
             recalculateWeights();
         }
+
         // Delete row
         function deleteRow(rowIndex) {
             initialRows.splice(rowIndex, 1);
@@ -816,22 +759,10 @@ require_once '../include/new-academai-sidebar.php';
             recalculateWeights();
         }
 
-        // Add new column
         function addColumn() {
-            // Check if the number of columns (including Weight %) is already 6
-            if (initialHeaders.length >= 6) {
-                Swal.fire({
-                    icon: 'error',
-                    title: 'Limit Reached',
-                    text: 'You cannot add more than 5 grading columns.'
-                });
-                return;
-            }
-
-            const newLevelNumber = 6 - initialHeaders.length;
-
-            const newHeaderNames = ["Very Satisfactory", "Satisfactory", "Excellent"];
-            const newHeaderName = newHeaderNames[newLevelNumber - 1] || `New Level (${newLevelNumber})`;
+            // Remove the 5 column limit
+            const newLevelNumber = initialHeaders.length;
+            const newHeaderName = `Level ${newLevelNumber}`;
             initialHeaders.splice(initialHeaders.length - 1, 0, newHeaderName);
 
             // Add new cell to each row
@@ -1183,41 +1114,33 @@ require_once '../include/new-academai-sidebar.php';
 
 
         function validateWeights() {
-            let totalWeight = 0;
             let hasInvalidWeights = false;
             const weightInputs = document.querySelectorAll('#rubricsTable tbody tr td:last-child input');
 
-            // Check individual weights
+            // Check individual weights - just ensure they're valid numbers
             weightInputs.forEach(input => {
                 const weight = parseFloat(input.value);
                 input.style.border = ""; // Reset styling
 
                 if (isNaN(weight)) {
-                    input.style.border = "1px solid red";
+                    input.style.border = "1px solid orange";
                     hasInvalidWeights = true;
-                    alert("❌ Error: Weight must be a number (e.g., 25, 10.5)");
-                    return; // Exit early on first error
-                }
-
-                if (weight < 0) {
-                    input.style.border = "1px solid red";
+                    // Don't show alert, just highlight
+                } else if (weight < 0) {
+                    input.style.border = "1px solid orange";
                     hasInvalidWeights = true;
-                    alert("❌ Error: Weight cannot be negative");
-                    return;
                 }
-
-                totalWeight += weight;
             });
 
-            // Check total weight
+            // Don't require total to be 100% - just warn if it's not
+            let totalWeight = 0;
+            weightInputs.forEach(input => {
+                totalWeight += parseFloat(input.value) || 0;
+            });
+
             if (Math.abs(totalWeight - 100) > 0.01) {
-                weightInputs.forEach(input => input.style.border = "1px solid red");
-                Swal.fire({
-                    icon: 'error',
-                    title: 'Invalid Total Weight',
-                    text: `Total weight must be exactly 100% (Current: ${totalWeight.toFixed(2)}%)`
-                });
-                return false;
+                // Just show a gentle warning, don't prevent saving
+                console.log(`Note: Total weight is ${totalWeight.toFixed(2)}% (not 100%)`);
             }
 
             return !hasInvalidWeights;
@@ -1759,21 +1682,21 @@ The criteria should be detailed and specific to ${subject}. Each cell should con
             const rowCount = parseInt(document.getElementById('rowCount').value, 10);
             const colCount = parseInt(document.getElementById('columnCount').value, 10);
 
-            // Validate inputs
-            if (isNaN(rowCount) || rowCount < 2 || rowCount > 8) {
+            // Remove strict limits - just check for reasonable bounds
+            if (isNaN(rowCount) || rowCount < 1) {
                 Swal.fire({
                     icon: 'error',
                     title: 'Invalid Row Count',
-                    text: 'Row count must be between 2 and 8'
+                    text: 'Row count must be at least 1'
                 });
                 return;
             }
 
-            if (isNaN(colCount) || colCount < 2 || colCount > 5) {
+            if (isNaN(colCount) || colCount < 1) {
                 Swal.fire({
                     icon: 'error',
                     title: 'Invalid Column Count',
-                    text: 'Column count must be between 2 and 5'
+                    text: 'Column count must be at least 1'
                 });
                 return;
             }
@@ -1798,6 +1721,7 @@ The criteria should be detailed and specific to ${subject}. Each cell should con
                 }
             });
         }
+
 
         // Function to reset rubric with custom dimensions
         function resetRubricWithDimensions(rowCount, colCount) {
@@ -1859,7 +1783,21 @@ The criteria should be detailed and specific to ${subject}. Each cell should con
             if (descriptionContainer) descriptionContainer.style.display = 'none';
 
         }
+        function updateInputLimits() {
+            // Remove max limits from the counter inputs
+            const rowCountInput = document.getElementById('rowCount');
+            const columnCountInput = document.getElementById('columnCount');
 
+            if (rowCountInput) {
+                rowCountInput.removeAttribute('max');
+                rowCountInput.setAttribute('min', '1');
+            }
+
+            if (columnCountInput) {
+                columnCountInput.removeAttribute('max');
+                columnCountInput.setAttribute('min', '1');
+            }
+        }
         // Update the generateRubrics function to pass row and column counts
         async function generateRubrics() {
             const subject = document.getElementById('subjectPrompt').value.trim();
