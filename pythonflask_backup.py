@@ -21,7 +21,8 @@ from difflib import SequenceMatcher
 import math
 from nltk.tokenize import sent_tokenize, word_tokenize
 from nltk.stem import PorterStemmer
-
+import traceback
+from flask import Flask, request, jsonify
 nltk_path = os.path.join(os.getcwd(), "nltk_data")
 if os.path.exists(nltk_path):
     shutil.rmtree(nltk_path)  # Remove old data to avoid corruption
@@ -258,7 +259,7 @@ def determine_rubric_level(similarity_score, rubric_headers):
 
 app = Flask(__name__)
 
-API_KEY = "AIzaSyC7VxTT2Gjo5MLdwwGXiKaDvpdx2IGge2I"
+API_KEY = "AIzaSyDlvq2Fin1tEG5AQqrqdGWiGy5aP0vAqSk"
 URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent"
 
 headers = {
@@ -378,6 +379,111 @@ def standardize_response(raw_text):
             "evaluation": raw_text
         }
 
+@app.route('/autogenerate', methods=['POST'])
+def autogenerate_essay():
+    data = request.json
+    if not data or 'essay' not in data or 'rubrics_criteria' not in data:
+        return jsonify({"error": "Missing required fields: essay and/or rubrics_criteria"}), 400
+
+    essay = data['essay']
+    rubrics_criteria = data['rubrics_criteria']
+
+
+    is_auto_generate = rubrics_criteria == "auto-generate"
+
+
+    row_count = 4
+    column_count = 4
+
+
+    if "row_count:" in essay:
+        row_match = re.search(r'row_count:\s*(\d+)', essay)
+        if row_match:
+            row_count = int(row_match.group(1))
+            row_count = max(2, min(8, row_count))
+
+    if "column_count:" in essay:
+        col_match = re.search(r'column_count:\s*(\d+)', essay)
+        if col_match:
+            column_count = int(col_match.group(1))
+            column_count = max(2, min(5, column_count))
+
+
+    headers_str = ", ".join([f'"Level {i+1} ({column_count+1-i})"' for i in range(column_count)])
+    rows_str = ""
+
+    for i in range(row_count):
+        cells_str = ", ".join([f'"LEVEL {j+1} DESCRIPTION"' for j in range(column_count)])
+        weight = 100 // row_count
+        extra = 100 % row_count
+
+        if i == 0:
+            weight += extra
+
+        rows_str += f"""
+    {{
+        "criteria": "CRITERION NAME {i+1}",
+        "cells": [{cells_str}, "{weight}"]
+    }}{"," if i < row_count-1 else ""}"""
+
+
+    json_template = f"""{{
+    "headers": [{headers_str}, "Weight %"],
+    "rows": [{rows_str}
+    ]
+}}"""
+
+
+    initiate_prompt = f"""Create a detailed academic rubric in JSON format with exactly {row_count} criteria rows and exactly {column_count} scoring levels plus a weight column.
+The output must follow this exact JSON structure:
+{json_template}
+
+IMPORTANT:
+1. Each criterion must have detailed descriptions (25-35 words) for all {column_count} performance levels.
+2. All weight percentages must sum to exactly 100%.
+3. Return ONLY the JSON object with no additional text before or after.
+4. Do not use markdown code blocks or any other formatting - just return the raw JSON.
+Based on this information: """
+
+    full_prompt = initiate_prompt + essay
+
+    payload = {
+        "contents": [
+            {
+                "parts": [
+                    {"text": full_prompt}
+                ]
+            }
+        ]
+    }
+
+    try:
+        response = requests.post(
+            f"{URL}?key={API_KEY}",
+            headers=headers,
+            data=json.dumps(payload)
+        )
+        response_data = response.json()
+        raw_text = response_data['candidates'][0]['content']['parts'][0]['text']
+
+
+        json_match = re.search(r'\{[\s\S]*"headers"[\s\S]*"rows"[\s\S]*\}', raw_text)
+        if json_match:
+            json_str = json_match.group(0)
+            try:
+                json_data = json.loads(json_str)
+                if "headers" in json_data and "rows" in json_data:
+                    return jsonify({"evaluation": json_data})
+                else:
+                    return jsonify({"evaluation": raw_text})
+            except json.JSONDecodeError:
+                return jsonify({"evaluation": raw_text})
+        else:
+            return jsonify({"evaluation": raw_text})
+
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
 
 
 @app.route('/evaluate', methods=['POST'])
@@ -389,6 +495,29 @@ def evaluate_essay():
     essay = data['essay']
     rubrics_criteria = data['rubrics_criteria']
     levels = data['level']
+
+    # NEW: Extract reference answer from essay prompt if available
+    reference_answer = None
+    accuracy_bonus = 0
+
+    # Look for reference answer in the essay prompt (from Creator benchmark section)
+    import re
+    reference_match = re.search(r'Creator benchmark:\s*(.+?)(?:\n|$)', essay, re.IGNORECASE | re.DOTALL)
+    if reference_match:
+        potential_reference = reference_match.group(1).strip()
+        # Check if it's not "N/A" and has meaningful content
+        if potential_reference and potential_reference.upper() != "N/A" and len(potential_reference.strip()) > 10:
+            reference_answer = potential_reference
+
+    # If we have a valid reference answer, calculate similarity and bonus
+    if reference_answer:
+        # Extract the actual student essay content (before the benchmark section)
+        student_essay_content = essay
+        if 'Creator benchmark:' in essay:
+            student_essay_content = essay.split('Creator benchmark:')[0].strip()
+
+        # Calculate semantic similarity between student answer and reference answer
+        accuracy_bonus = calculate_answer_accuracy(student_essay_content, reference_answer)
 
     # Enhanced AI detection function for internal use
     def detect_ai_content(text):
@@ -950,11 +1079,6 @@ def evaluate_essay():
             # Apply confidence multiplier more aggressively
             if confidence_multiplier > 1.3:  # High confidence
                 if ai_score > 0.5:
-                    ai_score = 0.5 + (ai_score - 0.5) * 1.5  # Push higher
-                else:
-                    ai_score = 0.5 - (0.5 - ai_score) * 1.5  # Push lower
-            elif confidence_multiplier > 1.1:  # Moderate confidence
-                if ai_score > 0.5:
                     ai_score = 0.5 + (ai_score - 0.5) * 1.2
                 else:
                     ai_score = 0.5 - (0.5 - ai_score) * 1.2
@@ -1005,24 +1129,109 @@ def evaluate_essay():
                 "is_entirely_gibberish": False
             }
 
+def calculate_answer_accuracy(student_answer, reference_answer):
+        """
+        Calculate accuracy bonus based on how well student answer matches reference answer
+        Returns a bonus multiplier between 0.0 and 0.3 (up to 30% bonus)
+        """
+        try:
+            import difflib
+            from collections import Counter
+
+            # Clean and normalize text for comparison
+            def clean_text(text):
+                import re
+                # Remove extra whitespace, convert to lowercase, remove special chars
+                text = re.sub(r'[^\w\s]', ' ', text.lower())
+                text = re.sub(r'\s+', ' ', text.strip())
+                return text
+
+            student_clean = clean_text(student_answer)
+            reference_clean = clean_text(reference_answer)
+
+            # Skip comparison if either text is too short
+            if len(student_clean.split()) < 3 or len(reference_clean.split()) < 3:
+                return 0.0
+
+            # Method 1: Sequence similarity using difflib
+            sequence_similarity = difflib.SequenceMatcher(None, student_clean, reference_clean).ratio()
+
+            # Method 2: Word overlap analysis
+            student_words = set(student_clean.split())
+            reference_words = set(reference_clean.split())
+
+            # Calculate Jaccard similarity (intersection over union)
+            intersection = len(student_words.intersection(reference_words))
+            union = len(student_words.union(reference_words))
+            jaccard_similarity = intersection / union if union > 0 else 0
+
+            # Method 3: Key concept extraction and matching
+            # Extract longer words (likely to be key concepts)
+            student_concepts = set([word for word in student_words if len(word) > 4])
+            reference_concepts = set([word for word in reference_words if len(word) > 4])
+
+            concept_intersection = len(student_concepts.intersection(reference_concepts))
+            concept_union = len(student_concepts.union(reference_concepts))
+            concept_similarity = concept_intersection / concept_union if concept_union > 0 else 0
+
+            # Method 4: Phrase matching (2-3 word combinations)
+            def get_phrases(text, n=2):
+                words = text.split()
+                return set([' '.join(words[i:i+n]) for i in range(len(words)-n+1)])
+
+            student_bigrams = get_phrases(student_clean, 2)
+            reference_bigrams = get_phrases(reference_clean, 2)
+
+            bigram_intersection = len(student_bigrams.intersection(reference_bigrams))
+            bigram_union = len(student_bigrams.union(reference_bigrams))
+            bigram_similarity = bigram_intersection / bigram_union if bigram_union > 0 else 0
+
+            # Calculate weighted average of different similarity measures
+            overall_similarity = (
+                sequence_similarity * 0.2 +      # 20% weight - overall text similarity
+                jaccard_similarity * 0.3 +       # 30% weight - word overlap
+                concept_similarity * 0.3 +       # 30% weight - key concepts
+                bigram_similarity * 0.2          # 20% weight - phrase matching
+            )
+
+            # Convert similarity to bonus multiplier
+            # High similarity (0.7+) = up to 30% bonus
+            # Good similarity (0.5-0.7) = 15-30% bonus
+            # Moderate similarity (0.3-0.5) = 5-15% bonus
+            # Low similarity (0.0-0.3) = 0-5% bonus
+
+            if overall_similarity >= 0.7:
+                bonus = 0.20 + (overall_similarity - 0.7) * 0.33  # 20-30% bonus
+            elif overall_similarity >= 0.5:
+                bonus = 0.10 + (overall_similarity - 0.5) * 0.50  # 10-20% bonus
+            elif overall_similarity >= 0.3:
+                bonus = 0.03 + (overall_similarity - 0.3) * 0.35  # 3-10% bonus
+            else:
+                bonus = overall_similarity * 0.10  # 0-3% bonus
+
+            return min(0.3, max(0.0, bonus))  # Cap at 30% bonus
+
+        except Exception as e:
+            print(f"Error calculating answer accuracy: {e}")
+            return 0.0  # No bonus on error
 
     # Perform AI detection
-    ai_detection_result = detect_ai_content(essay)
+        ai_detection_result = detect_ai_content(essay)
 
     # Check if essay is entirely gibberish
-    if ai_detection_result.get('is_entirely_gibberish', False):
+        if ai_detection_result.get('is_entirely_gibberish', False):
         # Return 0 score evaluation for entirely gibberish essays
-        zero_score_response = {
-            "criteria_scores": {},
-            "overall_weighted_score": 0,
-            "general_assessment": {
-                "strengths": ["N/A - Essay consists entirely of gibberish text"],
-                "areas_for_improvement": ["Submit a coherent essay with meaningful content related to the topic"]
-            },
-            "ai_detection": {
-                "formatted": ai_detection_result['formatted'],
-                "ai_probability": ai_detection_result['ai_probability'],
-                "human_probability": ai_detection_result['human_probability']
+            zero_score_response = {
+               "criteria_scores": {},
+                "overall_weighted_score": 0,
+                "general_assessment": {
+                    "strengths": ["N/A - Essay consists entirely of gibberish text"],
+                    "areas_for_improvement": ["Submit a coherent essay with meaningful content related to the topic"]
+                },
+                "ai_detection": {
+                    "formatted": ai_detection_result['formatted'],
+                    "ai_probability": ai_detection_result['ai_probability'],
+                    "human_probability": ai_detection_result['human_probability']
             },
             "plagiarism": {
                 "assessment": "NEGLIGIBLE",
@@ -1040,7 +1249,6 @@ def evaluate_essay():
         }
 
         # Add zero scores for each criterion
-        import re
         criteria_matches = re.findall(r'([^(]+)\s*\(Weight:\s*(\d+)%\)', rubrics_criteria)
         for criterion_name, weight in criteria_matches:
             criterion_name = criterion_name.strip()
@@ -1056,14 +1264,33 @@ def evaluate_essay():
         return jsonify({"evaluation": json.dumps(zero_score_response, indent=2)})
 
     # Calculate score penalty for partial gibberish
-    gibberish_penalty = 0
-    if ai_detection_result.get('gibberish_detected', False):
-        gibberish_ratio = ai_detection_result.get('gibberish_ratio', 0)
+        gibberish_penalty = 0
+        if ai_detection_result.get('gibberish_detected', False):
+            gibberish_ratio = ai_detection_result.get('gibberish_ratio', 0)
         # Apply penalty: up to 30% score reduction for high gibberish content
-        gibberish_penalty = min(0.3, gibberish_ratio * 0.5)
+            gibberish_penalty = min(0.3, gibberish_ratio * 0.5)
 
-    # Enhanced evaluation prompt with integrated AI detection and gibberish handling
-    initiate_prompt = f"""You are an expert essay evaluator. Grade the essay based on the provided rubric criteria.
+    # NEW: Apply accuracy bonus if reference answer exists and matches
+        accuracy_multiplier = 1.0 + accuracy_bonus  # Convert bonus to multiplier
+
+    # Enhanced evaluation prompt with integrated AI detection, gibberish handling, and accuracy bonus
+        accuracy_info = ""
+        if reference_answer:
+            accuracy_info = f"""
+REFERENCE ANSWER MATCHING:
+- Reference answer available: YES
+- Accuracy bonus earned: {accuracy_bonus:.1%} (multiplier: {accuracy_multiplier:.3f})
+- This bonus will be applied to all criterion scores based on content alignment with expected answer
+- Higher accuracy = higher scores across all criteria
+"""
+        else:
+            accuracy_info = """
+REFERENCE ANSWER MATCHING:
+- Reference answer available: NO (was "N/A" or not provided)
+- No accuracy bonus applied - scoring based purely on rubric criteria
+"""
+
+        initiate_prompt = f"""You are an expert essay evaluator. Grade the essay based on the provided rubric criteria.
 
 YOUR OUTPUT MUST BE IN VALID JSON FORMAT ONLY WITH NO ADDITIONAL TEXT OR FORMATTING. FOLLOW THIS EXACT STRUCTURE:
 
@@ -1078,11 +1305,21 @@ GIBBERISH CONTENT DETECTED:
 - Apply score penalty of {gibberish_penalty:.2f} (multiply final scores by {1-gibberish_penalty:.2f})
 - Coherent word count: {ai_detection_result.get('coherent_word_count', 0)}
 
+{accuracy_info}
+
+SCORING FORMULA:
+Final Score = (Base Rubric Score × Gibberish Penalty × Accuracy Multiplier)
+Where:
+- Base Rubric Score: 0-100 based on rubric criteria
+- Gibberish Penalty: {1-gibberish_penalty:.3f} (reduces score for nonsensical content)
+- Accuracy Multiplier: {accuracy_multiplier:.3f} (increases score for matching reference answer)
+
 EVALUATION INSTRUCTIONS:
-1. Evaluate ONLY the coherent parts of the essay
+1. Evaluate ONLY the coherent parts of the essay against rubric criteria
 2. Apply the gibberish penalty to reduce scores proportionally
-3. Mention gibberish content in feedback as a major weakness
-4. Focus scoring on meaningful content while penalizing nonsensical text
+3. Apply the accuracy multiplier to reward content that aligns with expected answers
+4. Mention both gibberish issues and reference answer alignment in feedback
+5. Focus scoring on meaningful content while penalizing nonsensical text and rewarding accuracy
 
 ```json
 {{
@@ -1096,13 +1333,14 @@ EVALUATION INSTRUCTIONS:
       ]
     }}
   }},
-  "overall_weighted_score": [numeric score after gibberish penalty],
+  "overall_weighted_score": [final weighted score after all adjustments],
   "general_assessment": {{
     "strengths": [
-      "[Analysis of strengths from coherent parts of the essay]"
+      "[Analysis of strengths from coherent parts and accuracy alignment]"
     ],
     "areas_for_improvement": [
       "[Include removal of gibberish content as major improvement area if present]",
+      "[Include better alignment with expected answer content if reference available]",
       "[Other specific improvements for coherent content]"
     ]
   }},
@@ -1123,17 +1361,24 @@ EVALUATION INSTRUCTIONS:
     "total_sources_analyzed": 0,
     "total_sources_found": 0
   }},
-  "plagiarism_sources": []
+  "plagiarism_sources": [],
+  "reference_answer_analysis": {{
+    "reference_available": {bool(reference_answer)},
+    "accuracy_bonus_applied": {accuracy_bonus:.3f},
+    "accuracy_multiplier": {accuracy_multiplier:.3f},
+    "alignment_quality": "{['Poor', 'Fair', 'Good', 'Excellent'][min(3, int(accuracy_bonus * 10))]}"
+  }}
 }}
 ```
 
 EVALUATION GUIDELINES:
-1. Score each criterion based on coherent content only
-2. Apply gibberish penalty: multiply calculated scores by {1-gibberish_penalty:.3f}
-3. Provide detailed feedback noting gibberish content as a significant issue
+1. Score each criterion based on coherent content and alignment with expected answers
+2. Apply penalties/bonuses: Base Score × {1-gibberish_penalty:.3f} × {accuracy_multiplier:.3f}
+3. Provide detailed feedback noting gibberish content and reference answer alignment
 4. Include {len(levels)} "why" explanations for each criterion (current level + why not other levels)
 5. Use the pre-calculated AI detection values exactly as provided
 6. Assess plagiarism based on coherent text patterns only
+7. Reward students whose answers demonstrate understanding similar to reference answer
 
 RUBRIC CRITERIA:
 {rubrics_criteria}
@@ -1141,10 +1386,10 @@ RUBRIC CRITERIA:
 ESSAY TO EVALUATE:
 {essay}"""
 
-    # Enhanced payload with better generation parameters
-    payload = {
-        "contents": [
-            {
+        # Enhanced payload with better generation parameters
+        payload = {
+            "contents": [
+                {
                 "parts": [
                     {"text": initiate_prompt}
                 ]
@@ -1158,191 +1403,85 @@ ESSAY TO EVALUATE:
         }
     }
 
-    try:
-        response = requests.post(
-            f"{URL}?key={API_KEY}",
-            headers=headers,
-            data=json.dumps(payload)
-        )
-
-        if response.status_code != 200:
-            return jsonify({"error": f"API Error {response.status_code}: {response.text}"}), response.status_code
-
-        response_data = response.json()
-        raw_text = response_data['candidates'][0]['content']['parts'][0]['text']
-
-        # Enhanced JSON extraction
         try:
-            # Clean the response text
-            cleaned_text = raw_text.strip()
+            response = requests.post(
+                f"{URL}?key={API_KEY}",
+                headers=headers,
+                data=json.dumps(payload)
+            )
 
-            # Remove markdown code blocks if present
-            if cleaned_text.startswith('```json'):
-                cleaned_text = re.sub(r'^```json\s*', '', cleaned_text)
-                cleaned_text = re.sub(r'\s*```$', '', cleaned_text)
-            elif cleaned_text.startswith('```'):
-                cleaned_text = re.sub(r'^```\s*', '', cleaned_text)
-                cleaned_text = re.sub(r'\s*```$', '', cleaned_text)
+            if response.status_code != 200:
+                return jsonify({"error": f"API Error {response.status_code}: {response.text}"}), response.status_code
 
-            # Try to extract JSON object
-            json_match = re.search(r'\{[\s\S]*\}', cleaned_text)
-            if json_match:
-                json_str = json_match.group(0)
-                try:
-                    parsed_json = json.loads(json_str)
+            response_data = response.json()
+            raw_text = response_data['candidates'][0]['content']['parts'][0]['text']
+
+            # Enhanced JSON extraction
+            try:
+                # Clean the response text
+                cleaned_text = raw_text.strip()
+
+                # Remove markdown code blocks if present
+                if cleaned_text.startswith('```json'):
+                    cleaned_text = re.sub(r'^```json\s*', '', cleaned_text)
+                    cleaned_text = re.sub(r'\s*```$', '', cleaned_text)
+                elif cleaned_text.startswith('```'):
+                    cleaned_text = re.sub(r'^```\s*', '', cleaned_text)
+                    cleaned_text = re.sub(r'\s*```$', '', cleaned_text)
+
+                # Try to extract JSON object
+                json_match = re.search(r'\{[\s\S]*\}', cleaned_text)
+                if json_match:
+                    json_str = json_match.group(0)
+                    try:
+                        parsed_json = json.loads(json_str)
 
                     # Ensure AI detection values are properly set
-                    if 'ai_detection' in parsed_json:
-                        parsed_json['ai_detection']['formatted'] = ai_detection_result['formatted']
-                        parsed_json['ai_detection']['ai_probability'] = ai_detection_result['ai_probability']
-                        parsed_json['ai_detection']['human_probability'] = ai_detection_result['human_probability']
+                        if 'ai_detection' in parsed_json:
+                            parsed_json['ai_detection']['formatted'] = ai_detection_result['formatted']
+                            parsed_json['ai_detection']['ai_probability'] = ai_detection_result['ai_probability']
+                            parsed_json['ai_detection']['human_probability'] = ai_detection_result['human_probability']
 
-                    return jsonify({"evaluation": json.dumps(parsed_json, indent=2)})
+                        return jsonify({"evaluation": json.dumps(parsed_json, indent=2)})
 
-                except json.JSONDecodeError as e:
-                    print(f"JSON parsing error: {e}")
-                    # Return raw text if JSON parsing fails
-                    return jsonify({"evaluation": raw_text})
-            else:
-                return jsonify({"evaluation": raw_text})
-
-        except Exception as parse_error:
-            print(f"Response parsing error: {parse_error}")
-            return jsonify({"evaluation": raw_text})
-
-        # Extract criteria levels for additional processing (if needed)
-        criteria_levels = {}
-        criteria_matches = re.finditer(r'"(.*?) \(Weight: \d+%\)": \{', raw_text)
-
-        for match in criteria_matches:
-            criteria_name = match.group(1)
-            criteria_block_start = match.end()
-            criteria_block_end = raw_text.find('}', criteria_block_start) + 1
-            criteria_block = raw_text[criteria_block_start:criteria_block_end]
-
-            levels_found = []
-            for level_match in re.finditer(r'(✅|❌) Why (.*?): (.*?)<br>', criteria_block):
-                level_symbol, level_name, level_sentence = level_match.groups()
-                level_name = level_name.replace("not ", "").strip()
-                levels_found.append({
-                    "Level": level_name,
-                    "Sentence": level_sentence.strip(),
-                    "Symbol": level_symbol
-                })
-
-            criteria_levels[criteria_name] = levels_found
-
-        return jsonify({"evaluation": raw_text, "criteria_analysis": criteria_levels})
-
-    except Exception as e:
-        print(f"Error during evaluation: {e}")
-        return jsonify({"error": str(e)}), 500
-
-@app.route('/autogenerate', methods=['POST'])
-def autogenerate_essay():
-    data = request.json
-    if not data or 'essay' not in data or 'rubrics_criteria' not in data:
-        return jsonify({"error": "Missing required fields: essay and/or rubrics_criteria"}), 400
-
-    essay = data['essay']
-    rubrics_criteria = data['rubrics_criteria']
-
-
-    is_auto_generate = rubrics_criteria == "auto-generate"
-
-
-    row_count = 4
-    column_count = 4
-
-
-    if "row_count:" in essay:
-        row_match = re.search(r'row_count:\s*(\d+)', essay)
-        if row_match:
-            row_count = int(row_match.group(1))
-            row_count = max(2, min(8, row_count))
-
-    if "column_count:" in essay:
-        col_match = re.search(r'column_count:\s*(\d+)', essay)
-        if col_match:
-            column_count = int(col_match.group(1))
-            column_count = max(2, min(5, column_count))
-
-
-    headers_str = ", ".join([f'"Level {i+1} ({column_count+1-i})"' for i in range(column_count)])
-    rows_str = ""
-
-    for i in range(row_count):
-        cells_str = ", ".join([f'"LEVEL {j+1} DESCRIPTION"' for j in range(column_count)])
-        weight = 100 // row_count
-        extra = 100 % row_count
-
-        if i == 0:
-            weight += extra
-
-        rows_str += f"""
-    {{
-        "criteria": "CRITERION NAME {i+1}",
-        "cells": [{cells_str}, "{weight}"]
-    }}{"," if i < row_count-1 else ""}"""
-
-
-    json_template = f"""{{
-    "headers": [{headers_str}, "Weight %"],
-    "rows": [{rows_str}
-    ]
-}}"""
-
-
-    initiate_prompt = f"""Create a detailed academic rubric in JSON format with exactly {row_count} criteria rows and exactly {column_count} scoring levels plus a weight column.
-The output must follow this exact JSON structure:
-{json_template}
-
-IMPORTANT:
-1. Each criterion must have detailed descriptions (25-35 words) for all {column_count} performance levels.
-2. All weight percentages must sum to exactly 100%.
-3. Return ONLY the JSON object with no additional text before or after.
-4. Do not use markdown code blocks or any other formatting - just return the raw JSON.
-Based on this information: """
-
-    full_prompt = initiate_prompt + essay
-
-    payload = {
-        "contents": [
-            {
-                "parts": [
-                    {"text": full_prompt}
-                ]
-            }
-        ]
-    }
-
-    try:
-        response = requests.post(
-            f"{URL}?key={API_KEY}",
-            headers=headers,
-            data=json.dumps(payload)
-        )
-        response_data = response.json()
-        raw_text = response_data['candidates'][0]['content']['parts'][0]['text']
-
-
-        json_match = re.search(r'\{[\s\S]*"headers"[\s\S]*"rows"[\s\S]*\}', raw_text)
-        if json_match:
-            json_str = json_match.group(0)
-            try:
-                json_data = json.loads(json_str)
-                if "headers" in json_data and "rows" in json_data:
-                    return jsonify({"evaluation": json_data})
+                    except json.JSONDecodeError as e:
+                        print(f"JSON parsing error: {e}")
+                        # Return raw text if JSON parsing fails
+                        return jsonify({"evaluation": raw_text})
                 else:
                     return jsonify({"evaluation": raw_text})
-            except json.JSONDecodeError:
+
+            except Exception as parse_error:
+                print(f"Response parsing error: {parse_error}")
                 return jsonify({"evaluation": raw_text})
-        else:
-            return jsonify({"evaluation": raw_text})
 
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
+            # Extract criteria levels for additional processing (if needed)
+            criteria_levels = {}
+            criteria_matches = re.finditer(r'"(.*?) \(Weight: \d+%\)": \{', raw_text)
 
+            for match in criteria_matches:
+                criteria_name = match.group(1)
+                criteria_block_start = match.end()
+                criteria_block_end = raw_text.find('}', criteria_block_start) + 1
+                criteria_block = raw_text[criteria_block_start:criteria_block_end]
+
+                levels_found = []
+                for level_match in re.finditer(r'(✅|❌) Why (.*?): (.*?)<br>', criteria_block):
+                    level_symbol, level_name, level_sentence = level_match.groups()
+                    level_name = level_name.replace("not ", "").strip()
+                    levels_found.append({
+                        "Level": level_name,
+                        "Sentence": level_sentence.strip(),
+                        "Symbol": level_symbol
+                    })
+
+                criteria_levels[criteria_name] = levels_found
+
+            return jsonify({"evaluation": raw_text, "criteria_analysis": criteria_levels})
+
+        except Exception as e:
+            print(f"Error during evaluation: {e}")
+            return jsonify({"error": str(e)}), 500
 
 
 @app.route('/analyze', methods=['POST'])
@@ -2463,6 +2602,3 @@ def determine_rubric_level(similarity_score, rubric_headers):
 
     # If score is above all thresholds, return the highest level
     return filtered_headers[-1]
-
-    if __name__ == '__main__':
-        app.run(debug=True)
