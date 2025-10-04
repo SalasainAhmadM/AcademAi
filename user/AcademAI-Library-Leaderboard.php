@@ -107,19 +107,20 @@ if (isset($_GET['quiz_id'])) {
         $participants = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
         // 3. Calculate scores for each participant
+        // 3. Calculate scores for each participant with similarity adjustments
         foreach ($participants as $key => $participant) {
             try {
                 // Get all answers with evaluation data for this quiz_taker_id
-                $answers_query = "SELECT qa.answer_id, q.points_per_item, ee.evaluation_data
-                                FROM quiz_answers qa
-                                JOIN essay_questions q ON qa.question_id = q.essay_id
-                                LEFT JOIN (
-                                    SELECT answer_id, evaluation_data 
-                                    FROM essay_evaluations 
-                                    ORDER BY evaluation_date DESC
-                                ) ee ON qa.answer_id = ee.answer_id
-                                WHERE qa.quiz_taker_id = :quiz_taker_id
-                                AND q.quiz_id = :quiz_id";
+                $answers_query = "SELECT qa.answer_id, qa.answer_text, q.points_per_item, q.essay_id, ee.evaluation_data
+                        FROM quiz_answers qa
+                        JOIN essay_questions q ON qa.question_id = q.essay_id
+                        LEFT JOIN (
+                            SELECT answer_id, evaluation_data 
+                            FROM essay_evaluations 
+                            ORDER BY evaluation_date DESC
+                        ) ee ON qa.answer_id = ee.answer_id
+                        WHERE qa.quiz_taker_id = :quiz_taker_id
+                        AND q.quiz_id = :quiz_id";
 
                 $answers_stmt = $conn->prepare($answers_query);
                 $answers_stmt->execute([
@@ -133,6 +134,7 @@ if (isset($_GET['quiz_id'])) {
                 $totalPossiblePoints = 0;
                 $evaluatedAnswers = 0;
                 $totalAnswers = count($answers);
+                $totalAdjustmentDifference = 0;
 
                 foreach ($answers as $answer) {
                     $totalPossiblePoints += $answer['points_per_item'];
@@ -148,31 +150,94 @@ if (isset($_GET['quiz_id'])) {
                         continue;
                     }
 
-                    // Calculate score percentage
-                    $percentage = 0;
+                    // Calculate base score percentage
+                    $basePercentage = 0;
+                    $evalData = null;
+
                     if (isset($data['evaluation']['evaluation'])) {
                         $evalJson = str_replace(["```json\n", "\n```"], "", $data['evaluation']['evaluation']);
                         $parsedEval = json_decode($evalJson, true);
 
                         if ($parsedEval) {
+                            $evalData = $parsedEval;
                             if (isset($parsedEval['overall_weighted_score'])) {
-                                $percentage = $parsedEval['overall_weighted_score'];
+                                $basePercentage = $parsedEval['overall_weighted_score'];
                             } elseif (isset($parsedEval['scores'])) {
-                                $percentage = (array_sum($parsedEval['scores']) / (count($parsedEval['scores']) * 100)) * 100;
+                                $basePercentage = (array_sum($parsedEval['scores']) / (count($parsedEval['scores']) * 100)) * 100;
                             }
                         }
                     }
 
-                    $totalPoints += ($percentage / 100) * $answer['points_per_item'];
+                    // Calculate base earned points
+                    $baseEarnedPoints = ($basePercentage / 100) * $answer['points_per_item'];
+                    $adjustedEarnedPoints = $baseEarnedPoints;
+
+                    // Calculate similarity adjustment if we have evaluation data with criteria scores
+                    if ($evalData && isset($evalData['criteria_scores']) && !empty($answer['answer_text'])) {
+                        $similarity_percentage = 0;
+
+                        // Get teacher's benchmark answer
+                        $teacherStmt = $conn->prepare("
+                    SELECT answer 
+                    FROM essay_questions 
+                    WHERE essay_id = ?
+                    LIMIT 1
+                ");
+                        $teacherStmt->execute([$answer['essay_id']]);
+                        $teacherResult = $teacherStmt->fetch(PDO::FETCH_ASSOC);
+
+                        if ($teacherResult && $teacherResult['answer'] !== 'N/A' && !empty($teacherResult['answer'])) {
+                            // Calculate similarity
+                            similar_text(
+                                strtolower(trim($answer['answer_text'])),
+                                strtolower(trim($teacherResult['answer'])),
+                                $similarity_percentage
+                            );
+
+                            // Apply adjustment if similarity >= 60%
+                            if ($similarity_percentage >= 60) {
+                                $totalAdjustedScore = 0;
+
+                                foreach ($evalData['criteria_scores'] as $criteria => $scoreData) {
+                                    $baseCriteriaScore = floatval($scoreData['score']);
+                                    $criteriaWeight = 0;
+
+                                    // Extract weight from criteria name
+                                    if (preg_match('/Weight:\s*(\d+(?:\.\d+)?)%/i', $criteria, $weightMatches)) {
+                                        $criteriaWeight = floatval($weightMatches[1]);
+                                    }
+
+                                    if ($criteriaWeight > 0) {
+                                        $adjustedCriteriaScore = ($similarity_percentage / 100) * $criteriaWeight;
+                                        $finalScore = min(max($baseCriteriaScore, $adjustedCriteriaScore), $criteriaWeight);
+                                        $totalAdjustedScore += $finalScore;
+                                    } else {
+                                        $totalAdjustedScore += $baseCriteriaScore;
+                                    }
+                                }
+
+                                // Recalculate earned points with adjusted score
+                                $adjustedEarnedPoints = ($totalAdjustedScore / 100) * $answer['points_per_item'];
+                            }
+                        }
+                    }
+
+                    // Calculate the difference
+                    $adjustmentDifference = $adjustedEarnedPoints - $baseEarnedPoints;
+                    $totalAdjustmentDifference += $adjustmentDifference;
+
+                    // Add adjusted points to total
+                    $totalPoints += $adjustedEarnedPoints;
                 }
 
-                // Store participant's score data
+                // Store participant's score data with adjustment info
                 $participants[$key]['overall_score'] = ($evaluatedAnswers > 0) ? round($totalPoints, 2) : 'Pending';
                 $participants[$key]['total_possible_points'] = $totalPossiblePoints;
                 $participants[$key]['has_evaluation'] = ($evaluatedAnswers > 0);
                 $participants[$key]['evaluated_answers'] = $evaluatedAnswers;
                 $participants[$key]['total_answers'] = $totalAnswers;
                 $participants[$key]['completion_percentage'] = ($totalAnswers > 0) ? round(($evaluatedAnswers / $totalAnswers) * 100, 0) : 0;
+                $participants[$key]['adjustment_difference'] = round($totalAdjustmentDifference, 2);
 
             } catch (Exception $e) {
                 error_log("Error processing participant " . $participant['student_id'] . ": " . $e->getMessage());
@@ -182,6 +247,7 @@ if (isset($_GET['quiz_id'])) {
                 $participants[$key]['evaluated_answers'] = 0;
                 $participants[$key]['total_answers'] = 0;
                 $participants[$key]['completion_percentage'] = 0;
+                $participants[$key]['adjustment_difference'] = 0;
             }
         }
 
@@ -566,10 +632,21 @@ if (isset($_SESSION['creation_id'])) {
                                     echo '<span class="error">Evaluation Error</span>';
                                 } else {
                                     echo number_format($score, 2) . ' / ' . $totalPossible;
+
+                                    if (isset($participant['adjustment_difference']) && abs($participant['adjustment_difference']) > 0.01) {
+                                        $adjustColor = $participant['adjustment_difference'] > 0 ? '#28a745' : '#dc3545';
+                                        //                             echo ' <span style="color: ' . $adjustColor . '; font-size: 0.85em; display: block; margin-top: 2px;"
+                                        //                             >
+                                        //     (' . ($participant['adjustment_difference'] > 0 ? '+' : '') .
+                                        //                                 number_format($participant['adjustment_difference'], 2) . ' pts adjusted)
+                                        //   </span>';
+                                    }
+
                                     if ($participant['completion_percentage'] < 100) {
                                         echo ' <span class="completion-status">(' . $participant['evaluated_answers'] . '/' . $participant['total_answers'] . ' evaluated)</span>';
                                     }
                                 }
+
 
                                 echo "</td>
             <td>

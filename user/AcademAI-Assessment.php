@@ -112,6 +112,61 @@ if ($quiz_id) {
     $quiz_details = $stmt->fetchAll(PDO::FETCH_ASSOC);
 }
 
+// Fetch student's answer and compare with teacher benchmark
+$student_answer = '';
+$teacher_answer = '';
+$similarity_level = '';
+$similarity_percentage = 0;
+
+if ($answer_id) {
+    // Get student's answer
+    $studentStmt = $conn->prepare("SELECT answer_text FROM quiz_answers WHERE answer_id = :answer_id");
+    $studentStmt->bindParam(':answer_id', $answer_id, PDO::PARAM_INT);
+    $studentStmt->execute();
+    $studentResult = $studentStmt->fetch(PDO::FETCH_ASSOC);
+
+    if ($studentResult) {
+        $student_answer = $studentResult['answer_text'];
+
+        // Get teacher's benchmark answer
+        $teacherStmt = $conn->prepare("
+            SELECT eq.answer 
+            FROM essay_evaluations ee
+            INNER JOIN essay_questions eq ON ee.question_id = eq.essay_id
+            WHERE ee.answer_id = :answer_id
+            LIMIT 1
+        ");
+        $teacherStmt->bindParam(':answer_id', $answer_id, PDO::PARAM_INT);
+        $teacherStmt->execute();
+        $teacherResult = $teacherStmt->fetch(PDO::FETCH_ASSOC);
+
+        if ($teacherResult && $teacherResult['answer'] !== 'N/A') {
+            $teacher_answer = $teacherResult['answer'];
+
+            // Calculate similarity using similar_text
+            $similarity_percentage = 0;
+            similar_text(
+                strtolower(trim($student_answer)),
+                strtolower(trim($teacher_answer)),
+                $similarity_percentage
+            );
+
+            // Determine similarity level
+            if ($similarity_percentage >= 95) {
+                $similarity_level = 'Accurate';
+            } elseif ($similarity_percentage >= 80) {
+                $similarity_level = 'Mostly Accurate';
+            } elseif ($similarity_percentage >= 60) {
+                $similarity_level = 'Likely Accurate';
+            } elseif ($similarity_percentage >= 40) {
+                $similarity_level = 'Not Accurate';
+            } else {
+                $similarity_level = 'Not Really Accurate';
+            }
+        }
+    }
+}
+
 // Process evaluation data
 $evaluationData = null;
 $parsedEvaluation = null;
@@ -173,6 +228,7 @@ $question_number = $_GET['question_number'] ?? 'Unknown';
             </div>
         </div>
     </div>
+
     <!-- Header with Back Button and User Profile -->
 
 
@@ -303,8 +359,118 @@ $question_number = $_GET['question_number'] ?? 'Unknown';
 
 
 
+    <!-- <?php if ($show_teacher_benchmark && !empty($teacher_answer) && !empty($student_answer)): ?>
+       Answer Comparison Section 
+        <div class="answer-comparison-section"
+            style="margin: 20px 0; padding: 25px; background: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%); border-radius: 12px; box-shadow: 0 4px 15px rgba(0,0,0,0.1);">
+            <h3
+                style="color: #1b4242; margin-bottom: 20px; font-size: 1.5em; display: flex; align-items: center; gap: 10px;">
+                <i class="fas fa-balance-scale"></i> Answer Comparison Analysis
+            </h3>
 
+            <div class="comparison-result" style="background: white; padding: 20px; border-radius: 8px; margin-bottom: 20px; border-left: 5px solid <?php
+            if ($similarity_percentage >= 95)
+                echo '#28a745';
+            elseif ($similarity_percentage >= 80)
+                echo '#5cb85c';
+            elseif ($similarity_percentage >= 60)
+                echo '#ffc107';
+            elseif ($similarity_percentage >= 40)
+                echo '#fd7e14';
+            else
+                echo '#dc3545';
+            ?>;">
+                <div
+                    style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 15px;">
+                    <div>
+                        <p style="margin: 0; font-size: 1.1em; color: #495057;">
+                            <strong>Similarity Level:</strong>
+                            <span style="color: <?php
+                            if ($similarity_percentage >= 95)
+                                echo '#28a745';
+                            elseif ($similarity_percentage >= 80)
+                                echo '#5cb85c';
+                            elseif ($similarity_percentage >= 60)
+                                echo '#ffc107';
+                            elseif ($similarity_percentage >= 40)
+                                echo '#fd7e14';
+                            else
+                                echo '#dc3545';
+                            ?>; font-weight: bold; font-size: 1.2em;">
+                                <?php echo htmlspecialchars($similarity_level); ?>
+                            </span>
+                        </p>
+                    </div>
+                    <div>
+                        <p style="margin: 0; font-size: 1.1em; color: #495057;">
+                            <strong>Similarity Score:</strong>
+                            <span style="color: <?php
+                            if ($similarity_percentage >= 95)
+                                echo '#28a745';
+                            elseif ($similarity_percentage >= 80)
+                                echo '#5cb85c';
+                            elseif ($similarity_percentage >= 60)
+                                echo '#ffc107';
+                            elseif ($similarity_percentage >= 40)
+                                echo '#fd7e14';
+                            else
+                                echo '#dc3545';
+                            ?>; font-weight: bold; font-size: 1.2em;">
+                                <?php echo number_format($similarity_percentage, 2); ?>%
+                            </span>
+                        </p>
+                    </div>
+                </div>
 
+                <div style="margin-top: 15px; padding: 15px; background: #f8f9fa; border-radius: 6px;">
+                    <p style="margin: 0; color: #6c757d; font-size: 0.95em; line-height: 1.6;">
+                        <?php
+                        if ($similarity_percentage >= 95) {
+                            echo '<i class="fas fa-check-circle" style="color: #28a745;"></i> Your answer shows excellent alignment with the benchmark answer. The content demonstrates comprehensive understanding and matches the expected response very closely.';
+                        } elseif ($similarity_percentage >= 80) {
+                            echo '<i class="fas fa-check" style="color: #5cb85c;"></i> Your answer shows strong alignment with the benchmark answer. Most key points are covered with good understanding.';
+                        } elseif ($similarity_percentage >= 60) {
+                            echo '<i class="fas fa-info-circle" style="color: #ffc107;"></i> Your answer shows moderate alignment with the benchmark answer. Several key points are present but some important details may be missing.';
+                        } elseif ($similarity_percentage >= 40) {
+                            echo '<i class="fas fa-exclamation-triangle" style="color: #fd7e14;"></i> Your answer shows limited alignment with the benchmark answer. Many key points are missing or differ significantly from the expected response.';
+                        } else {
+                            echo '<i class="fas fa-times-circle" style="color: #dc3545;"></i> Your answer shows minimal alignment with the benchmark answer. The response differs substantially from the expected content and may require significant revision.';
+                        }
+                        ?>
+                    </p>
+                </div>
+            </div>
+
+            <div class="answers-display" style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px;">
+                <div class="student-answer-box"
+                    style="background: white; padding: 20px; border-radius: 8px; box-shadow: 0 2px 8px rgba(0,0,0,0.05);">
+                    <h4 style="color: #1b4242; margin-bottom: 12px; display: flex; align-items: center; gap: 8px;">
+                        <i class="fas fa-user-graduate"></i> Your Answer
+                    </h4>
+                    <div
+                        style="max-height: 200px; overflow-y: auto; padding: 12px; background: #f8f9fa; border-radius: 6px; border: 1px solid #dee2e6;">
+                        <p style="margin: 0; color: #495057; white-space: pre-wrap; line-height: 1.6;">
+                            <?php echo htmlspecialchars($student_answer); ?>
+                        </p>
+                    </div>
+                </div>
+
+                <div class="benchmark-answer-box"
+                    style="background: white; padding: 20px; border-radius: 8px; box-shadow: 0 2px 8px rgba(0,0,0,0.05);">
+                    <h4 style="color: #1b4242; margin-bottom: 12px; display: flex; align-items: center; gap: 8px;">
+                        <i class="fas fa-chalkboard-teacher"></i> Benchmark Answer
+                    </h4>
+                    <div
+                        style="max-height: 200px; overflow-y: auto; padding: 12px; background: #f8f9fa; border-radius: 6px; border: 1px solid #dee2e6;">
+                        <p style="margin: 0; color: #495057; white-space: pre-wrap; line-height: 1.6;">
+                            <?php echo htmlspecialchars($teacher_answer); ?>
+                        </p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    <?php endif; ?>
+    -->
 
 
 
@@ -457,68 +623,96 @@ $question_number = $_GET['question_number'] ?? 'Unknown';
 
                                             <p class="rubrics">
                                                 <?php
-                                                echo htmlspecialchars($criteriaName) . " -<br> Score: " . htmlspecialchars($criteriaData["score"]) . "%";
+                                                // Get the base score
+                                                $baseScore = floatval($criteriaData["score"]);
 
-                                                // Initialize level and levelNumber
+                                                // Extract weight from criteria name (e.g., "Grammatical Accuracy (Weight: 25%)")
+                                                $criteriaWeight = 0;
+                                                if (preg_match('/Weight:\s*(\d+(?:\.\d+)?)%/i', $criteriaName, $weightMatches)) {
+                                                    $criteriaWeight = floatval($weightMatches[1]);
+                                                }
+
+                                                // Calculate adjusted score based on similarity if meets threshold and weight was found
+                                                $finalScore = $baseScore;
+
+                                                if (isset($similarity_percentage) && $similarity_percentage >= 60 && $criteriaWeight > 0) {
+                                                    // Convert similarity percentage to a score adjustment
+                                                    // 100% similarity = full weight (e.g., 25%)
+                                                    // 90% similarity = 90% of weight (e.g., 22.5%)
+                                                    // 71% similarity = 71% of weight (e.g., 17.75%)
+                                                    // 60% similarity = 60% of weight (e.g., 15%)
+                                                    $adjustedScore = ($similarity_percentage / 100) * $criteriaWeight;
+
+                                                    // Use the higher of base score or adjusted score, capped at weight
+                                                    $finalScore = min(max($baseScore, $adjustedScore), $criteriaWeight);
+
+                                                    // Display the criteria name and scores
+                                                    echo htmlspecialchars($criteriaName) . " -<br>";
+                                                    echo "Score: " . number_format($finalScore, 2) . "%</strong>";
+
+                                                    // echo "Base Score: " . number_format($baseScore, 2) . "%<br>";
+                                                    // echo "Similarity Adjusted: " . number_format($adjustedScore, 2) . "%<br>";
+                                                    // echo "<strong>Final Score: " . number_format($finalScore, 2) . "%</strong>";
+                                                    // Add color indicator based on similarity level
+                                                    $bonusColor = '';
+                                                    if ($similarity_percentage >= 95) {
+                                                        $bonusColor = '#28a745'; // Green
+                                                    } elseif ($similarity_percentage >= 80) {
+                                                        $bonusColor = '#5cb85c'; // Light green
+                                                    } elseif ($similarity_percentage >= 60) {
+                                                        $bonusColor = '#ffc107'; // Yellow
+                                                    }
+
+                                                    // echo " <span style='color: " . $bonusColor . "; font-size: 0.9em;'>(" . number_format($similarity_percentage, 0) . "% similarity)</span>";
+                                                } else {
+                                                    // No similarity adjustment applied
+                                                    echo htmlspecialchars($criteriaName) . " -<br> Score: " . number_format($baseScore, 2) . "%";
+                                                }
+
+
+                                                // Rest of your existing level detection code...
                                                 $level = '';
                                                 $levelNumber = null;
 
-                                                // Check if compared_answer_data exists and has matched_header
                                                 if (isset($compared_answer_data['matched_header']) && !empty($compared_answer_data['matched_header'])) {
-                                                    // Use the matched_header from compared_answer_data
                                                     $level = $compared_answer_data['matched_header'];
-
-                                                    // Find the corresponding level number
                                                     if (isset($criteriaDatas['headers']) && is_array($criteriaDatas['headers'])) {
                                                         foreach ($criteriaDatas['headers'] as $index => $header) {
                                                             if (strcasecmp($header, $level) === 0) {
-                                                                $levelNumber = $index + 1; // Add 1 to make it human-readable (1-based index)
+                                                                $levelNumber = $index + 1;
                                                                 break;
                                                             }
                                                         }
                                                     }
                                                 } else {
-                                                    // Fallback: Use regex to extract the level from the feedback (original logic)
                                                     if (preg_match('/✅\s+Why\s+(\w[\w\s]*\w):/i', $criteriaData["feedback"], $matches)) {
                                                         $level = trim($matches[1]);
-
-                                                        // Find the corresponding level number
                                                         if (isset($criteriaDatas['headers']) && is_array($criteriaDatas['headers'])) {
                                                             foreach ($criteriaDatas['headers'] as $index => $header) {
                                                                 if (strcasecmp($header, $level) === 0) {
-                                                                    $levelNumber = $index + 1; // Add 1 to make it human-readable (1-based index)
+                                                                    $levelNumber = $index + 1;
                                                                     break;
                                                                 }
                                                             }
                                                         }
                                                     }
                                                 }
-
-                                                // echo "<br>Level: " . htmlspecialchars($level);
-                                                // if ($levelNumber !== null) {
-                                                //     echo " (" . htmlspecialchars($levelNumber) . ")";
-                                                // }
                                                 ?>
                                                 <br>Level:
                                                 <?php
-                                                // Find matching criterion for current criteria name
+                                                // Your existing level display code continues here...
                                                 $currentMatchingCriterion = null;
                                                 if (isset($compared_answer_data['individual_criteria_analysis']) && is_array($compared_answer_data['individual_criteria_analysis'])) {
                                                     $individualAnalysis = $compared_answer_data['individual_criteria_analysis'];
-
-                                                    // Find matching criterion (case-insensitive and flexible matching)
                                                     foreach ($individualAnalysis as $key => $analysis) {
-                                                        // Try exact match first
                                                         if (strcasecmp($key, $criteriaName) === 0) {
                                                             $currentMatchingCriterion = $analysis;
                                                             break;
                                                         }
-                                                        // Try partial match (useful for variations in naming)
                                                         if (stripos($key, $criteriaName) !== false || stripos($criteriaName, $key) !== false) {
                                                             $currentMatchingCriterion = $analysis;
                                                             break;
                                                         }
-                                                        // Check criterion_name field if it exists
                                                         if (isset($analysis['criterion_name']) && strcasecmp($analysis['criterion_name'], $criteriaName) === 0) {
                                                             $currentMatchingCriterion = $analysis;
                                                             break;
@@ -529,26 +723,21 @@ $question_number = $_GET['question_number'] ?? 'Unknown';
                                                 if (isset($currentMatchingCriterion['matched_level'])) {
                                                     $matchedLevel = $currentMatchingCriterion['matched_level'];
                                                     echo htmlspecialchars($matchedLevel);
-
-                                                    // Find the index in headers array and add 1 for 1-based indexing
                                                     if (isset($criteriaDatas['headers']) && is_array($criteriaDatas['headers'])) {
                                                         $levelIndex = array_search($matchedLevel, $criteriaDatas['headers']);
                                                         if ($levelIndex !== false) {
-                                                            $levelNumber = $levelIndex + 1; // Convert to 1-based index
+                                                            $levelNumber = $levelIndex + 1;
                                                             echo "(" . htmlspecialchars($levelNumber) . ")";
                                                         }
                                                     }
                                                 } else {
-                                                    // Fallback: Use regex to extract the level from the feedback (original logic)
                                                     if (preg_match('/✅\s+Why\s+(\w[\w\s]*\w):/i', $criteriaData["feedback"], $matches)) {
                                                         $level = trim($matches[1]);
                                                         echo htmlspecialchars($level);
-
-                                                        // Find the corresponding level number
                                                         if (isset($criteriaDatas['headers']) && is_array($criteriaDatas['headers'])) {
                                                             $levelIndex = array_search($level, $criteriaDatas['headers']);
                                                             if ($levelIndex !== false) {
-                                                                $levelNumber = $levelIndex + 1; // Convert to 1-based index
+                                                                $levelNumber = $levelIndex + 1;
                                                                 echo "(" . htmlspecialchars($levelNumber) . ")";
                                                             }
                                                         }
@@ -557,6 +746,7 @@ $question_number = $_GET['question_number'] ?? 'Unknown';
                                                     }
                                                 }
                                                 ?>
+                                            </p>
                                         </div>
 
 

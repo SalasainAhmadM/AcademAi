@@ -104,6 +104,7 @@ if (!$questions)
 
 // Process answers and evaluations
 $totalPoints = 0;
+$totalAdjustmentDifference = 0; // Track total points added/subtracted by adjustments
 $questionData = [];
 
 foreach ($questions as $index => $question) {
@@ -127,27 +128,100 @@ foreach ($questions as $index => $question) {
         $stmt->execute([$answer['answer_id']]);
         $evaluation = $stmt->fetch(PDO::FETCH_ASSOC);
 
-        if ($evaluation) {
-            $evalData = json_decode(str_replace(
-                ["```json\n", "\n```"],
-                "",
-                json_decode($evaluation['evaluation_data'], true)["evaluation"]["evaluation"]
-            ), true);
+        if ($evaluation && isset($evaluation['evaluation_data'])) {
+            $outerData = json_decode($evaluation['evaluation_data'], true);
 
-            $points_per_item = $question['points_per_item'];
-            $score = $evalData["overall_weighted_score"];
-            $earnedPoints = ($score / 100) * $points_per_item;
-            $totalPoints += $earnedPoints;
+            if ($outerData && isset($outerData["evaluation"]["evaluation"])) {
+                $cleanedJson = str_replace(
+                    ["```json\n", "\n```"],
+                    "",
+                    $outerData["evaluation"]["evaluation"]
+                );
 
-            $questionData[$index]['evaluation'] = [
-                'data' => $evalData,
-                'score' => $score,
-                'earnedPoints' => $earnedPoints,
-                'points_possible' => $points_per_item
-            ];
+                $evalData = json_decode($cleanedJson, true);
 
-            // Create assessment link with all required parameters
-            $questionData[$index]['rubric_link'] = "AcademAI-Assessment-Instructor.php?quiz_id=$quiz_id&answer_id={$answer['answer_id']}&rubric_id={$question['rubric_id']}&student_id=$student_id&quiz_taker_id=$quiz_taker_id";
+                if ($evalData && isset($evalData["overall_weighted_score"])) {
+                    $points_per_item = $question['points_per_item'];
+                    $baseScore = $evalData["overall_weighted_score"];
+                    $baseEarnedPoints = ($baseScore / 100) * $points_per_item;
+
+                    // Initialize with base values
+                    $adjustedEarnedPoints = $baseEarnedPoints;
+                    $similarity_percentage = 0;
+
+                    // Calculate similarity if available
+                    $answer_id = $answer['answer_id'];
+                    $studentStmt = $pdo->prepare("SELECT answer_text FROM quiz_answers WHERE answer_id = ?");
+                    $studentStmt->execute([$answer_id]);
+                    $studentResult = $studentStmt->fetch(PDO::FETCH_ASSOC);
+
+                    if ($studentResult) {
+                        $student_answer = $studentResult['answer_text'];
+
+                        $teacherStmt = $pdo->prepare("
+                            SELECT eq.answer 
+                            FROM essay_evaluations ee
+                            INNER JOIN essay_questions eq ON ee.question_id = eq.essay_id
+                            WHERE ee.answer_id = ?
+                            LIMIT 1
+                        ");
+                        $teacherStmt->execute([$answer_id]);
+                        $teacherResult = $teacherStmt->fetch(PDO::FETCH_ASSOC);
+
+                        if ($teacherResult && $teacherResult['answer'] !== 'N/A') {
+                            $teacher_answer = $teacherResult['answer'];
+                            similar_text(
+                                strtolower(trim($student_answer)),
+                                strtolower(trim($teacher_answer)),
+                                $similarity_percentage
+                            );
+                        }
+                    }
+
+                    // Apply adjustment if similarity >= 60%
+                    if ($similarity_percentage >= 60) {
+                        $totalAdjustedScore = 0;
+
+                        foreach ($evalData['criteria_scores'] as $criteria => $scoreData) {
+                            $baseCriteriaScore = floatval($scoreData['score']);
+                            $criteriaWeight = 0;
+
+                            if (preg_match('/Weight:\s*(\d+(?:\.\d+)?)%/i', $criteria, $weightMatches)) {
+                                $criteriaWeight = floatval($weightMatches[1]);
+                            }
+
+                            if ($criteriaWeight > 0) {
+                                $adjustedCriteriaScore = ($similarity_percentage / 100) * $criteriaWeight;
+                                $finalScore = min(max($baseCriteriaScore, $adjustedCriteriaScore), $criteriaWeight);
+                                $totalAdjustedScore += $finalScore;
+                            } else {
+                                $totalAdjustedScore += $baseCriteriaScore;
+                            }
+                        }
+
+                        $adjustedEarnedPoints = ($totalAdjustedScore / 100) * $points_per_item;
+                    }
+
+                    // Calculate the difference (adjustment impact)
+                    $adjustmentDifference = $adjustedEarnedPoints - $baseEarnedPoints;
+                    $totalAdjustmentDifference += $adjustmentDifference;
+
+                    // Add adjusted points to total
+                    $totalPoints += $adjustedEarnedPoints;
+
+                    $questionData[$index]['evaluation'] = [
+                        'data' => $evalData,
+                        'score' => $baseScore,
+                        'earnedPoints' => $adjustedEarnedPoints,
+                        'baseEarnedPoints' => $baseEarnedPoints,
+                        'adjustmentDifference' => $adjustmentDifference,
+                        'points_possible' => $points_per_item,
+                        'similarity_percentage' => $similarity_percentage
+                    ];
+
+                    $questionData[$index]['rubric_link'] = "AcademAI-Assessment-Instructor.php?quiz_id=$quiz_id&answer_id={$answer['answer_id']}&rubric_id={$question['rubric_id']}&student_id=$student_id&quiz_taker_id=$quiz_taker_id";
+                }
+            }
         }
     }
 }
@@ -892,10 +966,16 @@ foreach ($questions as $index => $question) {
             <button class="tab-btn" onclick="showTab('submission-info')">
                 <i class="fas fa-paper-plane"></i> Submission
             </button>
-            <div class="tabs-total-score"> Quiz Total Score:
-
-                <?php echo number_format($totalPoints, 2); ?> /
+            <div class="tabs-total-score">
+                Quiz Total Score: <?php echo number_format($totalPoints, 2); ?> /
                 <?php echo htmlspecialchars($quiz['quiz_total_points_essay']); ?> pts
+                <?php if (abs($totalAdjustmentDifference) > 0.01): ?>
+                    <span
+                        style="color: <?php echo $totalAdjustmentDifference > 0 ? '#28a745' : '#dc3545'; ?>; font-size: 0.85em; display: block; margin-top: 3px;">
+                        <!-- (<?php echo $totalAdjustmentDifference > 0 ? '+' : ''; ?><?php echo number_format($totalAdjustmentDifference, 2); ?>
+                        pts from similarity adjustment) -->
+                    </span>
+                <?php endif; ?>
             </div>
         </div>
 
@@ -994,7 +1074,80 @@ foreach ($questions as $index => $question) {
                     </div>
                     <div class="question-points">
                         <?php if (isset($data['evaluation'])): ?>
-                            <?php echo number_format($data['evaluation']['earnedPoints'], 2); ?> /
+                            <?php
+                            // Get similarity percentage for this answer to determine if adjustment applies
+                            $answer_id = $data['answer']['answer_id'] ?? null;
+                            $similarity_percentage = 0;
+                            $adjustedEarnedPoints = $data['evaluation']['earnedPoints'];
+
+                            if ($answer_id) {
+                                // Fetch student's answer and teacher's benchmark
+                                $studentStmt = $pdo->prepare("SELECT answer_text FROM quiz_answers WHERE answer_id = ?");
+                                $studentStmt->execute([$answer_id]);
+                                $studentResult = $studentStmt->fetch(PDO::FETCH_ASSOC);
+
+                                if ($studentResult) {
+                                    $student_answer = $studentResult['answer_text'];
+
+                                    // Get teacher's benchmark answer
+                                    $teacherStmt = $pdo->prepare("
+                                        SELECT eq.answer 
+                                        FROM essay_evaluations ee
+                                        INNER JOIN essay_questions eq ON ee.question_id = eq.essay_id
+                                        WHERE ee.answer_id = ?
+                                        LIMIT 1
+                                    ");
+                                    $teacherStmt->execute([$answer_id]);
+                                    $teacherResult = $teacherStmt->fetch(PDO::FETCH_ASSOC);
+
+                                    if ($teacherResult && $teacherResult['answer'] !== 'N/A') {
+                                        $teacher_answer = $teacherResult['answer'];
+
+                                        // Calculate similarity
+                                        similar_text(
+                                            strtolower(trim($student_answer)),
+                                            strtolower(trim($teacher_answer)),
+                                            $similarity_percentage
+                                        );
+                                    }
+                                }
+                            }
+
+                            // Calculate total adjusted score if similarity threshold is met
+                            if ($similarity_percentage >= 60) {
+                                $totalAdjustedScore = 0;
+                                $hasSimilarityAdjustment = false;
+
+                                foreach ($data['evaluation']['data']['criteria_scores'] as $criteria => $scoreData) {
+                                    $baseScore = floatval($scoreData['score']);
+
+                                    // Extract weight from criteria name
+                                    $criteriaWeight = 0;
+                                    if (preg_match('/Weight:\s*(\d+(?:\.\d+)?)%/i', $criteria, $weightMatches)) {
+                                        $criteriaWeight = floatval($weightMatches[1]);
+                                    }
+
+                                    // Calculate adjusted score
+                                    $finalScore = $baseScore;
+
+                                    if ($similarity_percentage >= 60 && $criteriaWeight > 0) {
+                                        $adjustedScore = ($similarity_percentage / 100) * $criteriaWeight;
+                                        $finalScore = min(max($baseScore, $adjustedScore), $criteriaWeight);
+                                        $hasSimilarityAdjustment = true;
+                                    }
+
+                                    $totalAdjustedScore += $finalScore;
+                                }
+
+                                // If adjustment was applied, recalculate earned points
+                                if ($hasSimilarityAdjustment) {
+                                    // Convert adjusted percentage to points
+                                    // Formula: (adjustedScore / 100) * points_possible
+                                    $adjustedEarnedPoints = ($totalAdjustedScore / 100) * $data['evaluation']['points_possible'];
+                                }
+                            }
+                            ?>
+                            <?php echo number_format($adjustedEarnedPoints, 2); ?> /
                             <?php echo $data['evaluation']['points_possible']; ?> pts
                         <?php else: ?>
                             0 / <?php echo $data['question']['points_per_item']; ?> pts
@@ -1015,25 +1168,145 @@ foreach ($questions as $index => $question) {
 
                 <?php if (isset($data['evaluation'])): ?>
                     <div class="rubrics-section">
+                        <?php
+                        // Get similarity percentage for this answer if available
+                        $answer_id = $data['answer']['answer_id'] ?? null;
+                        $similarity_percentage = 0;
+
+                        if ($answer_id) {
+                            // Fetch student's answer and teacher's benchmark
+                            $studentStmt = $pdo->prepare("SELECT answer_text FROM quiz_answers WHERE answer_id = ?");
+                            $studentStmt->execute([$answer_id]);
+                            $studentResult = $studentStmt->fetch(PDO::FETCH_ASSOC);
+
+                            if ($studentResult) {
+                                $student_answer = $studentResult['answer_text'];
+
+                                // Get teacher's benchmark answer
+                                $teacherStmt = $pdo->prepare("
+                                    SELECT eq.answer 
+                                    FROM essay_evaluations ee
+                                    INNER JOIN essay_questions eq ON ee.question_id = eq.essay_id
+                                    WHERE ee.answer_id = ?
+                                    LIMIT 1
+                                ");
+                                $teacherStmt->execute([$answer_id]);
+                                $teacherResult = $teacherStmt->fetch(PDO::FETCH_ASSOC);
+
+                                if ($teacherResult && $teacherResult['answer'] !== 'N/A') {
+                                    $teacher_answer = $teacherResult['answer'];
+
+                                    // Calculate similarity
+                                    similar_text(
+                                        strtolower(trim($student_answer)),
+                                        strtolower(trim($teacher_answer)),
+                                        $similarity_percentage
+                                    );
+                                }
+                            }
+                        }
+
+                        // Calculate total adjusted score
+                        $totalAdjustedScore = 0;
+                        $hasSimilarityAdjustment = false;
+
+                        foreach ($data['evaluation']['data']['criteria_scores'] as $criteria => $scoreData) {
+                            $baseScore = floatval($scoreData['score']);
+
+                            // Extract weight from criteria name
+                            $criteriaWeight = 0;
+                            if (preg_match('/Weight:\s*(\d+(?:\.\d+)?)%/i', $criteria, $weightMatches)) {
+                                $criteriaWeight = floatval($weightMatches[1]);
+                            }
+
+                            // Calculate adjusted score
+                            $finalScore = $baseScore;
+
+                            if ($similarity_percentage >= 60 && $criteriaWeight > 0) {
+                                $adjustedScore = ($similarity_percentage / 100) * $criteriaWeight;
+                                $finalScore = min(max($baseScore, $adjustedScore), $criteriaWeight);
+                                $hasSimilarityAdjustment = true;
+                            }
+
+                            $totalAdjustedScore += $finalScore;
+                        }
+                        ?>
+
                         <div class="rubrics-header">
                             <i class="fas fa-chart-bar"></i>
                             <h4>Evaluation Results</h4>
-                            <span class="total-score"><?php echo $data['evaluation']['score']; ?>%</span>
+                            <span class="total-score">
+                                <?php if ($hasSimilarityAdjustment): ?>
+                                    <?php echo number_format($totalAdjustedScore, 2); ?>%
+                                    <?php
+                                    $headerColor = '';
+                                    if ($similarity_percentage >= 95) {
+                                        $headerColor = '#28a745';
+                                    } elseif ($similarity_percentage >= 80) {
+                                        $headerColor = '#5cb85c';
+                                    } elseif ($similarity_percentage >= 60) {
+                                        $headerColor = '#ffc107';
+                                    }
+                                    ?>
+                                    <!-- <span
+                                        style="color: <?php echo $headerColor; ?>; font-size: 0.85em; display: block; margin-top: 3px;">
+                                        (Adjusted: <?php echo number_format($similarity_percentage, 0); ?>% similarity)
+                                    </span> -->
+                                <?php else: ?>
+                                    <?php echo $data['evaluation']['score']; ?>%
+                                <?php endif; ?>
+                            </span>
                         </div>
 
-                        <?php foreach ($data['evaluation']['data']['criteria_scores'] as $criteria => $scoreData): ?>
+                        <?php
+                        foreach ($data['evaluation']['data']['criteria_scores'] as $criteria => $scoreData):
+                            // Get the base score
+                            $baseScore = floatval($scoreData['score']);
+
+                            // Extract weight from criteria name
+                            $criteriaWeight = 0;
+                            if (preg_match('/Weight:\s*(\d+(?:\.\d+)?)%/i', $criteria, $weightMatches)) {
+                                $criteriaWeight = floatval($weightMatches[1]);
+                            }
+
+                            // Calculate adjusted score based on similarity if meets threshold
+                            $finalScore = $baseScore;
+                            $showSimilarityInfo = false;
+
+                            if ($similarity_percentage >= 60 && $criteriaWeight > 0) {
+                                // Convert similarity percentage to a score adjustment
+                                $adjustedScore = ($similarity_percentage / 100) * $criteriaWeight;
+
+                                // Use the higher of base score or adjusted score, capped at weight
+                                $finalScore = min(max($baseScore, $adjustedScore), $criteriaWeight);
+                                $showSimilarityInfo = true;
+                            }
+                            ?>
                             <div class="rubric-item">
                                 <p><?php echo htmlspecialchars($criteria); ?></p>
-                                <span class="rubric-score"><?php echo $scoreData['score']; ?>%</span>
+                                <span class="rubric-score">
+                                    <?php if ($showSimilarityInfo): ?>
+                                        <?php echo number_format($finalScore, 2); ?>%
+
+                                        <?php
+                                        $bonusColor = '';
+                                        if ($similarity_percentage >= 95) {
+                                            $bonusColor = '#28a745';
+                                        } elseif ($similarity_percentage >= 80) {
+                                            $bonusColor = '#5cb85c';
+                                        } elseif ($similarity_percentage >= 60) {
+                                            $bonusColor = '#ffc107';
+                                        }
+                                        ?>
+                                        <!-- <span style="color: <?php echo $bonusColor; ?>; font-size: 0.85em; margin-left: 5px;">
+                                            (<?php echo number_format($similarity_percentage, 0); ?>% similarity)
+                                        </span> -->
+                                    <?php else: ?>
+                                        <?php echo $scoreData['score']; ?>%
+                                    <?php endif; ?>
+                                </span>
                             </div>
                         <?php endforeach; ?>
-                        <div class="rubric-selection-btn">
-                            <?php if ($data['rubric_link']): ?>
-                                <a href="<?php echo htmlspecialchars($data['rubric_link']); ?>" class="assessment-btn">
-                                    <i class="fas fa-table-list"></i> View Detailed Rubric & Assessment
-                                </a>
-                            </div>
-                        <?php endif; ?>
                     </div>
                 <?php endif; ?>
 
