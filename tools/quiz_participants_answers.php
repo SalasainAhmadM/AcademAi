@@ -335,13 +335,29 @@ try {
 
     // ✅ Step 3: Update quiz_participation status to 'completed' and proceed to grading
     if (isset($_GET["quiz_id"]) && !empty($_POST)) {
+        $quiz_id = $_GET["quiz_id"];
+
+        // Update participation status
         $updateStatus = $pdo->prepare("UPDATE quiz_participation SET status = 'completed' WHERE quiz_taker_id = ?");
         $updateStatus->execute([$quiz_taker_id]);
 
-        $pdo->commit();
-        $quiz_id = $_GET["quiz_id"];
-        header("Location:grade.php?quiz_id=$quiz_id");
+        // ✅ Get the user_id for this quiz_taker_id and quiz_id
+        $getUserId = $pdo->prepare("SELECT user_id FROM quiz_participation WHERE quiz_taker_id = ? AND quiz_id = ? LIMIT 1");
+        $getUserId->execute([$quiz_taker_id, $quiz_id]);
+        $result = $getUserId->fetch(PDO::FETCH_ASSOC);
+
+        if ($result && isset($result['user_id'])) {
+            $user_id = $result['user_id'];
+
+            $pdo->commit();
+            header("Location:grade.php?quiz_id=$quiz_id&student_id=$user_id");
+            exit();
+        } else {
+            $pdo->rollBack();
+            die("❌ Error: Could not find user_id for this quiz_taker_id and quiz_id.");
+        }
     }
+
 
 } catch (PDOException $e) {
     $pdo->rollBack();

@@ -47,6 +47,8 @@ if ((time() - $_SESSION['last_activity']) > $timeout_duration) {
 // Update last activity time
 $_SESSION['last_activity'] = time();
 
+$student_id = isset($_SESSION['creation_id']) ? $_SESSION['creation_id'] : null;
+
 // Regenerate session ID periodically for security
 if (!isset($_SESSION['created_time'])) {
     $_SESSION['created_time'] = time();
@@ -784,6 +786,8 @@ header("Referrer-Policy: strict-origin-when-cross-origin");
 
 
     <script>
+        const studentId = <?php echo json_encode($student_id); ?>;
+
         document.addEventListener("DOMContentLoaded", () => {
             const form = document.querySelector("form[action='../tools/join_quiz.php']");
             let currentQuizId = null;
@@ -799,8 +803,6 @@ header("Referrer-Policy: strict-origin-when-cross-origin");
                     activeModal = null;
                 }
 
-
-                // Replace the existing fetch response handler in your script with this modified version:
                 fetch('../tools/join_quiz.php', {
                     method: 'POST',
                     body: formData
@@ -829,7 +831,6 @@ header("Referrer-Policy: strict-origin-when-cross-origin");
                         currentQuizId = data.quiz_id || null;
 
                         if (data.already_joined) {
-                            // If already joined and quiz is running, show confirmation before redirect
                             if (data.status === 'running') {
                                 Swal.fire({
                                     title: 'Quiz is Running!',
@@ -842,7 +843,8 @@ header("Referrer-Policy: strict-origin-when-cross-origin");
                                     cancelButtonText: 'Cancel'
                                 }).then((result) => {
                                     if (result.isConfirmed) {
-                                        window.location.href = `AcademAI-Join-Quiz-Essay.php?quiz_id=${currentQuizId}`;
+                                        // Modified: Include student_id in URL
+                                        window.location.href = `AcademAI-Join-Quiz-Essay.php?quiz_id=${currentQuizId}&student_id=${studentId}`;
                                     }
                                 });
                                 return;
@@ -855,7 +857,6 @@ header("Referrer-Policy: strict-origin-when-cross-origin");
                             }
                         }
 
-                        // Clear any previous modal before showing new one
                         if (activeModal) {
                             closeModal(activeModal);
                         }
@@ -863,7 +864,6 @@ header("Referrer-Policy: strict-origin-when-cross-origin");
                         if (data.status === 'upcoming') {
                             showModal("upcoming-card-modal", `This quiz will be available on ${data.start_date} at ${data.start_time}. Do you want to join this quiz for now?`);
                         } else if (data.status === 'running') {
-                            // For running quizzes, show confirmation before joining and redirecting
                             Swal.fire({
                                 title: 'Quiz is Running!',
                                 text: 'This quiz is currently in progress. Do you want to join now?',
@@ -890,9 +890,7 @@ header("Referrer-Policy: strict-origin-when-cross-origin");
                         alert("An error occurred. Please try again.");
                     });
 
-                // Update the joinQuizAndRedirect function to also show confirmation for loading state
                 function joinQuizAndRedirect(quizId) {
-                    // Show loading state
                     Swal.fire({
                         title: 'Joining Quiz...',
                         text: 'Please wait while we connect you to the quiz.',
@@ -917,9 +915,9 @@ header("Referrer-Policy: strict-origin-when-cross-origin");
                                 const data = typeof response === 'string' ? JSON.parse(response) : response;
 
                                 if (data.success || (data.message && data.message.includes("already joined"))) {
-                                    // Close loading and redirect to the quiz page for running quizzes
                                     Swal.close();
-                                    window.location.href = `AcademAI-Join-Quiz-Essay.php?quiz_id=${quizId}`;
+                                    // Modified: Include student_id in URL
+                                    window.location.href = `AcademAI-Join-Quiz-Essay.php?quiz_id=${quizId}&student_id=${studentId}`;
                                 } else {
                                     Swal.fire({
                                         icon: 'warning',
@@ -991,16 +989,16 @@ header("Referrer-Policy: strict-origin-when-cross-origin");
                             const data = typeof response === 'string' ? JSON.parse(response) : response;
 
                             if (data.success) {
-                                // New join — redirect to upcoming or running
+                                // Modified: Include student_id in URL
                                 const redirectPage = modalId === "upcoming-card-modal"
                                     ? "AcademAI-Activity-Upcoming-Card.php"
-                                    : "AcademAI-Activity-Running-Card.php?quiz_id=" + quizId;
+                                    : `AcademAI-Activity-Running-Card.php?quiz_id=${quizId}&student_id=${studentId}`;
                                 window.location.href = redirectPage;
 
                             } else if (data.message && data.message.includes("already joined")) {
-                                // Already joined — use returned status to redirect correctly
                                 if (data.status === 'running') {
-                                    window.location.href = "AcademAI-Join-Quiz-Essay.php?quiz_id=" + quizId;
+                                    // Modified: Include student_id in URL
+                                    window.location.href = `AcademAI-Join-Quiz-Essay.php?quiz_id=${quizId}&student_id=${studentId}`;
                                 } else if (data.status === 'upcoming') {
                                     window.location.href = "AcademAI-Activity-Upcoming-Card.php";
                                 } else {
@@ -1035,15 +1033,12 @@ header("Referrer-Policy: strict-origin-when-cross-origin");
                 });
             }
 
-
-
             function closeModal(modal) {
                 modal.style.display = "none";
                 activeModal = null;
             }
         });
 
-        // Keep your existing modal close handlers
         document.getElementById("alert-close").addEventListener("click", function () {
             let modal = document.getElementById("invalid-code-modal");
             modal.style.opacity = "0";

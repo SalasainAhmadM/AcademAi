@@ -508,17 +508,17 @@ class EssayEvaluator
   /**
    * Get answers for a specific question
    */
-  public function getQuestionAnswers($questionId, $quizId)
+  public function getQuestionAnswers($questionId, $quizId, $studentId)
   {
     try {
       $stmt = $this->conn->prepare("
-                SELECT qa.*, a.first_name, a.last_name 
-                FROM quiz_answers qa 
-                JOIN quiz_participation qp ON qa.quiz_taker_id = qp.quiz_taker_id
-                JOIN academai a ON qp.user_id = a.creation_id
-                WHERE qa.question_id = ? AND qp.quiz_id = ?
-            ");
-      $stmt->execute([$questionId, $quizId]);
+            SELECT qa.*, a.first_name, a.last_name 
+            FROM quiz_answers qa 
+            JOIN quiz_participation qp ON qa.quiz_taker_id = qp.quiz_taker_id
+            JOIN academai a ON qp.user_id = a.creation_id
+            WHERE qa.question_id = ? AND qp.quiz_id = ? AND qp.user_id = ?
+        ");
+      $stmt->execute([$questionId, $quizId, $studentId]);
       return $stmt->fetchAll(PDO::FETCH_ASSOC);
     } catch (PDOException $e) {
       throw new Exception('Failed to get question answers: ' . $e->getMessage());
@@ -791,7 +791,7 @@ strictly follow the format of example output:
   /**
    * Modified processEssayEvaluations method with benchmark integration and answer comparison
    */
-  public function processEssayEvaluations($quizId)
+  public function processEssayEvaluations($quizId, $student_id)
   {
     // Validate quiz ID
     if (!$quizId || !is_numeric($quizId)) {
@@ -827,7 +827,7 @@ strictly follow the format of example output:
       $criteriaFormatted = $this->formatRubricCriteria($decodedData);
 
       // Get answers for this question
-      $answers = $this->getQuestionAnswers($question['essay_id'], $quizId);
+      $answers = $this->getQuestionAnswers($question['essay_id'], $quizId, $student_id);
 
       // Process each answer
       foreach ($answers as $answer) {
@@ -947,10 +947,10 @@ strictly follow the format of example output:
 try {
   // Get quiz ID from URL parameter with validation
   $quiz_id = filter_input(INPUT_GET, 'quiz_id', FILTER_VALIDATE_INT);
-  if (!$quiz_id) {
-    throw new Exception('Invalid or missing quiz ID');
+  $student_id = filter_input(INPUT_GET, 'student_id', FILTER_VALIDATE_INT);
+  if (!$quiz_id || !$student_id) {
+    throw new Exception('Invalid or missing quiz ID or student ID');
   }
-
   // Initialize database connection
   require_once '../classes/connection.php';
   $db = new Database();
@@ -960,7 +960,7 @@ try {
   $evaluator = new EssayEvaluator($conn);
 
   // Process all evaluations
-  $allResults = $evaluator->processEssayEvaluations($quiz_id);
+  $allResults = $evaluator->processEssayEvaluations($quiz_id, $student_id);
 
   // Store results in session and redirect
   if (session_status() === PHP_SESSION_NONE) {
