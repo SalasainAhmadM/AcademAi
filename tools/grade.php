@@ -812,9 +812,10 @@ strictly follow the format of example output:
     }
 
     $allResults = [];
-    $api2Url = 'https://kaizokuDev.pythonanywhere.com/check_plagiarism';
-    $benchmarkUrl = 'https://kaizokuDev.pythonanywhere.com/benchmark';
-    $compareUrl = 'https://kaizokuDev.pythonanywhere.com/compare';
+    $api2Url = 'https://academai.onrender.com/check_plagiarism';
+    $benchmarkUrl = 'https://academai.onrender.com/benchmark';
+    $compareUrl = 'https://academai.onrender.com/compare';
+
     $googleApiKey = null;
     $googleCx = null;
 
