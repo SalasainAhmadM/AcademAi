@@ -1,4 +1,529 @@
 <?php
+function calculateSemanticSimilarity($student_answer, $teacher_answer)
+{
+    // Normalize
+    $student_norm = normalizeText($student_answer);
+    $teacher_norm = normalizeText($teacher_answer);
+
+    // Multi-dimensional analysis
+    $scores = [];
+
+    // 1. N-gram Overlap Analysis (30%) - Phrase matching
+    $scores['ngram_overlap'] = calculateNGramOverlap($student_norm, $teacher_norm);
+
+    // 2. Semantic Word Coverage (25%) - Word-level similarity
+    $scores['word_coverage'] = calculateSemanticWordCoverage($student_norm, $teacher_norm);
+
+    // 3. Sentence Embedding Similarity (20%) - Meaning similarity
+    $scores['sentence_similarity'] = calculateSentenceSimilarity($student_answer, $teacher_answer);
+
+    // 4. Key Entity Matching (15%) - Important nouns/verbs
+    $scores['entity_matching'] = calculateEntityMatching($student_norm, $teacher_norm);
+
+    // 5. Structural Similarity (10%) - Organization
+    $scores['structural'] = calculateStructuralSimilarity($student_answer, $teacher_answer);
+
+    // Weights
+    $weights = [
+        'ngram_overlap' => 0.30,
+        'word_coverage' => 0.25,
+        'sentence_similarity' => 0.20,
+        'entity_matching' => 0.15,
+        'structural' => 0.10
+    ];
+
+    // Calculate weighted score
+    $finalScore = 0;
+    foreach ($scores as $metric => $score) {
+        $finalScore += $score * $weights[$metric];
+    }
+
+    // Dynamic boosting based on answer quality
+    $finalScore = applyDynamicBoost($finalScore, $scores, $student_answer, $teacher_answer);
+
+    // Determine level
+    if ($finalScore >= 85) {
+        $similarity_level = 'Accurate';
+    } elseif ($finalScore >= 70) {
+        $similarity_level = 'Mostly Accurate';
+    } elseif ($finalScore >= 55) {
+        $similarity_level = 'Likely Accurate';
+    } elseif ($finalScore >= 38) {
+        $similarity_level = 'Not Accurate';
+    } else {
+        $similarity_level = 'Not Really Accurate';
+    }
+
+    return [
+        'percentage' => min(round($finalScore, 2), 100),
+        'level' => $similarity_level,
+        'breakdown' => $scores
+    ];
+}
+
+function normalizeText($text)
+{
+    $text = strtolower($text);
+    $text = preg_replace('/\s+/', ' ', $text);
+    $text = preg_replace('/[^\w\s]/', ' ', $text);
+    return trim($text);
+}
+
+function calculateNGramOverlap($student, $teacher)
+{
+    /**
+     * Calculate overlap of 1-5 word sequences
+     * Weighted: longer phrases = more important
+     */
+    $studentWords = explode(' ', $student);
+    $teacherWords = explode(' ', $teacher);
+
+    $scores = [];
+    $weights = [5 => 3.0, 4 => 2.5, 3 => 2.0, 2 => 1.5, 1 => 1.0];
+
+    foreach ($weights as $n => $weight) {
+        $studentNgrams = extractNGrams($studentWords, $n);
+        $teacherNgrams = extractNGrams($teacherWords, $n);
+
+        if (empty($teacherNgrams))
+            continue;
+
+        $matches = 0;
+        foreach ($teacherNgrams as $tNgram) {
+            foreach ($studentNgrams as $sNgram) {
+                $similarity = compareNGrams($sNgram, $tNgram);
+                if ($similarity > 0.8) { // 80% similar
+                    $matches += $similarity;
+                    break;
+                }
+            }
+        }
+
+        $ngramScore = (count($teacherNgrams) > 0) ?
+            ($matches / count($teacherNgrams)) * 100 : 0;
+        $scores[] = $ngramScore * $weight;
+    }
+
+    $totalWeight = array_sum($weights);
+    return array_sum($scores) / $totalWeight;
+}
+
+function extractNGrams($words, $n)
+{
+    $ngrams = [];
+    $count = count($words);
+
+    for ($i = 0; $i <= $count - $n; $i++) {
+        $ngrams[] = implode(' ', array_slice($words, $i, $n));
+    }
+
+    return $ngrams;
+}
+
+function compareNGrams($ngram1, $ngram2)
+{
+    // Exact match
+    if ($ngram1 === $ngram2)
+        return 1.0;
+
+    // Partial match with word reordering allowed
+    $words1 = explode(' ', $ngram1);
+    $words2 = explode(' ', $ngram2);
+
+    $matches = 0;
+    foreach ($words1 as $w1) {
+        foreach ($words2 as $w2) {
+            if (areSimilarWords($w1, $w2)) {
+                $matches++;
+                break;
+            }
+        }
+    }
+
+    return $matches / max(count($words1), count($words2));
+}
+
+function areSimilarWords($word1, $word2)
+{
+    // Exact match
+    if ($word1 === $word2)
+        return true;
+
+    // Length check
+    $len1 = strlen($word1);
+    $len2 = strlen($word2);
+    if ($len1 < 3 || $len2 < 3)
+        return false;
+
+    // Prefix matching (first 70% of shorter word)
+    $minLen = min($len1, $len2);
+    $prefixLen = max(3, (int) ($minLen * 0.7));
+    if (substr($word1, 0, $prefixLen) === substr($word2, 0, $prefixLen)) {
+        return true;
+    }
+
+    // Levenshtein distance (allow 1-2 character differences)
+    $maxDiff = ($minLen <= 5) ? 1 : 2;
+    $distance = levenshtein(
+        substr($word1, 0, 10),
+        substr($word2, 0, 10)
+    );
+
+    return $distance <= $maxDiff;
+}
+
+function calculateSemanticWordCoverage($student, $teacher)
+{
+    /**
+     * Universal stop words removal
+     * Then calculate what % of teacher's content words appear in student
+     */
+    $stopWords = [
+        'the',
+        'a',
+        'an',
+        'and',
+        'or',
+        'but',
+        'in',
+        'on',
+        'at',
+        'to',
+        'for',
+        'of',
+        'with',
+        'by',
+        'from',
+        'up',
+        'about',
+        'into',
+        'through',
+        'during',
+        'before',
+        'after',
+        'above',
+        'below',
+        'between',
+        'under',
+        'again',
+        'further',
+        'then',
+        'once',
+        'here',
+        'there',
+        'when',
+        'where',
+        'why',
+        'how',
+        'all',
+        'both',
+        'each',
+        'few',
+        'more',
+        'most',
+        'other',
+        'some',
+        'such',
+        'no',
+        'nor',
+        'not',
+        'only',
+        'own',
+        'same',
+        'so',
+        'than',
+        'too',
+        'very',
+        's',
+        't',
+        'can',
+        'will',
+        'just',
+        'don',
+        'should',
+        'now',
+        'is',
+        'are',
+        'was',
+        'were',
+        'be',
+        'been',
+        'being',
+        'have',
+        'has',
+        'had',
+        'do',
+        'does',
+        'did',
+        'doing',
+        'would',
+        'could',
+        'ought',
+        'i',
+        'you',
+        'he',
+        'she',
+        'it',
+        'we',
+        'they',
+        'them',
+        'their',
+        'what',
+        'which',
+        'who',
+        'whom',
+        'this',
+        'that',
+        'these',
+        'those',
+        'am',
+        'if',
+        'as',
+        'until',
+        'while',
+        'my',
+        'your',
+        'his',
+        'her',
+        'its',
+        'our'
+    ];
+
+    $studentWords = array_diff(explode(' ', $student), $stopWords);
+    $teacherWords = array_diff(explode(' ', $teacher), $stopWords);
+
+    // Remove very short words
+    $studentWords = array_filter($studentWords, function ($w) {
+        return strlen($w) > 2; });
+    $teacherWords = array_filter($teacherWords, function ($w) {
+        return strlen($w) > 2; });
+
+    if (empty($teacherWords))
+        return 75;
+
+    $matched = 0;
+    $used = [];
+
+    foreach ($teacherWords as $tWord) {
+        foreach ($studentWords as $idx => $sWord) {
+            if (in_array($idx, $used))
+                continue;
+
+            if (areSimilarWords($tWord, $sWord)) {
+                $matched++;
+                $used[] = $idx;
+                break;
+            }
+        }
+    }
+
+    $coverage = ($matched / count($teacherWords)) * 100;
+
+    // Bonus for high coverage
+    if ($coverage > 75) {
+        $coverage *= 1.1;
+    }
+
+    return min($coverage, 100);
+}
+
+function calculateSentenceSimilarity($student, $teacher)
+{
+    /**
+     * Break into sentences and compare meaning
+     * Uses TF-IDF-like weighting
+     */
+    $studentSentences = splitIntoSentences($student);
+    $teacherSentences = splitIntoSentences($teacher);
+
+    if (empty($teacherSentences))
+        return 70;
+
+    $totalScore = 0;
+
+    foreach ($teacherSentences as $tSent) {
+        $bestMatch = 0;
+
+        foreach ($studentSentences as $sSent) {
+            $score = compareSentences($sSent, $tSent);
+            $bestMatch = max($bestMatch, $score);
+        }
+
+        $totalScore += $bestMatch;
+    }
+
+    return $totalScore / count($teacherSentences);
+}
+
+function splitIntoSentences($text)
+{
+    $sentences = preg_split('/[.!?]+/', $text);
+    return array_values(array_filter(array_map('trim', $sentences), function ($s) {
+        return strlen($s) > 10;
+    }));
+}
+
+function compareSentences($sent1, $sent2)
+{
+    $sent1_norm = normalizeText($sent1);
+    $sent2_norm = normalizeText($sent2);
+
+    // Word overlap
+    $words1 = explode(' ', $sent1_norm);
+    $words2 = explode(' ', $sent2_norm);
+
+    $intersection = count(array_intersect($words1, $words2));
+    $union = count(array_unique(array_merge($words1, $words2)));
+
+    if ($union == 0)
+        return 0;
+
+    $jaccardScore = ($intersection / $union) * 100;
+
+    // Adjust for sentence length similarity
+    $lenRatio = min(count($words1), count($words2)) /
+        max(count($words1), count($words2));
+
+    return $jaccardScore * (0.7 + 0.3 * $lenRatio);
+}
+
+function calculateEntityMatching($student, $teacher)
+{
+    /**
+     * Extract important entities (nouns, numbers, key terms)
+     * Universal - works for any subject
+     */
+    $studentEntities = extractEntities($student);
+    $teacherEntities = extractEntities($teacher);
+
+    if (empty($teacherEntities))
+        return 75;
+
+    $matched = 0;
+
+    foreach ($teacherEntities as $tEntity) {
+        foreach ($studentEntities as $sEntity) {
+            if (
+                areSimilarWords($tEntity, $sEntity) ||
+                stripos($sEntity, $tEntity) !== false ||
+                stripos($tEntity, $sEntity) !== false
+            ) {
+                $matched++;
+                break;
+            }
+        }
+    }
+
+    return ($matched / count($teacherEntities)) * 100;
+}
+
+function extractEntities($text)
+{
+    $entities = [];
+    $words = explode(' ', $text);
+
+    // 1. Numbers and measurements
+    foreach ($words as $word) {
+        if (preg_match('/\d+/', $word)) {
+            $entities[] = $word;
+        }
+    }
+
+    // 2. Capitalized words (proper nouns) - in original case
+    preg_match_all('/\b[A-Z][a-z]+\b/', $text, $matches);
+    $entities = array_merge($entities, $matches[0]);
+
+    // 3. Longer words (likely important terms)
+    foreach ($words as $word) {
+        if (strlen($word) > 6) {
+            $entities[] = $word;
+        }
+    }
+
+    // 4. Repeated words (emphasized)
+    $wordCounts = array_count_values($words);
+    foreach ($wordCounts as $word => $count) {
+        if ($count > 1 && strlen($word) > 4) {
+            $entities[] = $word;
+        }
+    }
+
+    return array_unique($entities);
+}
+
+function calculateStructuralSimilarity($student, $teacher)
+{
+    /**
+     * Compare structure: length, complexity, organization
+     */
+    $scores = [];
+
+    // 1. Word count similarity
+    $wc1 = str_word_count($student);
+    $wc2 = str_word_count($teacher);
+    $wcRatio = min($wc1, $wc2) / max($wc1, $wc2, 1);
+    $scores[] = $wcRatio * 100;
+
+    // 2. Sentence count similarity
+    $sc1 = count(splitIntoSentences($student));
+    $sc2 = count(splitIntoSentences($teacher));
+    $scRatio = ($sc1 == 0 || $sc2 == 0) ? 0.5 :
+        min($sc1, $sc2) / max($sc1, $sc2);
+    $scores[] = $scRatio * 100;
+
+    // 3. Average word length (complexity)
+    $avgLen1 = $wc1 > 0 ? strlen(str_replace(' ', '', $student)) / $wc1 : 0;
+    $avgLen2 = $wc2 > 0 ? strlen(str_replace(' ', '', $teacher)) / $wc2 : 0;
+    $lenRatio = ($avgLen1 == 0 || $avgLen2 == 0) ? 0.7 :
+        min($avgLen1, $avgLen2) / max($avgLen1, $avgLen2);
+    $scores[] = $lenRatio * 100;
+
+    return array_sum($scores) / count($scores);
+}
+
+function applyDynamicBoost($score, $scores, $student, $teacher)
+{
+    /**
+     * Dynamic boosting - no hardcoded rules
+     */
+
+    // Boost 1: All metrics reasonably good
+    $goodMetrics = 0;
+    foreach ($scores as $s) {
+        if ($s > 70)
+            $goodMetrics++;
+    }
+    if ($goodMetrics >= 4) {
+        $score += 5;
+    } elseif ($goodMetrics >= 3) {
+        $score += 3;
+    }
+
+    // Boost 2: High n-gram overlap (good phrase matching)
+    if ($scores['ngram_overlap'] > 75) {
+        $score += 4;
+    }
+
+    // Boost 3: Excellent word coverage
+    if ($scores['word_coverage'] > 80) {
+        $score += 3;
+    }
+
+    // Boost 4: Strong sentence similarity
+    if ($scores['sentence_similarity'] > 75) {
+        $score += 3;
+    }
+
+    // Boost 5: Similar length (comprehensive answer)
+    $wc1 = str_word_count($student);
+    $wc2 = str_word_count($teacher);
+    $ratio = min($wc1, $wc2) / max($wc1, $wc2, 1);
+    if ($ratio > 0.7) {
+        $score += 2;
+    }
+
+    return min($score, 100);
+}
 session_start();
 if (!isset($_SESSION['logged_in'])) {
     header('Location: ../login.php');
@@ -140,30 +665,16 @@ if ($answer_id) {
         $teacherStmt->execute();
         $teacherResult = $teacherStmt->fetch(PDO::FETCH_ASSOC);
 
+
         if ($teacherResult && $teacherResult['answer'] !== 'N/A') {
             $teacher_answer = $teacherResult['answer'];
 
-            // Calculate similarity using similar_text
-            $similarity_percentage = 0;
-            similar_text(
-                strtolower(trim($student_answer)),
-                strtolower(trim($teacher_answer)),
-                $similarity_percentage
-            );
-
-            // Determine similarity level
-            if ($similarity_percentage >= 95) {
-                $similarity_level = 'Accurate';
-            } elseif ($similarity_percentage >= 80) {
-                $similarity_level = 'Mostly Accurate';
-            } elseif ($similarity_percentage >= 60) {
-                $similarity_level = 'Likely Accurate';
-            } elseif ($similarity_percentage >= 40) {
-                $similarity_level = 'Not Accurate';
-            } else {
-                $similarity_level = 'Not Really Accurate';
-            }
+            // Use the new semantic similarity function
+            $similarityResult = calculateSemanticSimilarity($student_answer, $teacher_answer);
+            $similarity_percentage = $similarityResult['percentage'];
+            $similarity_level = $similarityResult['level'];
         }
+
     }
 }
 
@@ -359,8 +870,8 @@ $question_number = $_GET['question_number'] ?? 'Unknown';
 
 
 
-    <!-- <?php if ($show_teacher_benchmark && !empty($teacher_answer) && !empty($student_answer)): ?>
-       Answer Comparison Section 
+    <?php if ($show_teacher_benchmark && !empty($teacher_answer) && !empty($student_answer)): ?>
+        Answer Comparison Section
         <div class="answer-comparison-section"
             style="margin: 20px 0; padding: 25px; background: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%); border-radius: 12px; box-shadow: 0 4px 15px rgba(0,0,0,0.1);">
             <h3
@@ -470,7 +981,7 @@ $question_number = $_GET['question_number'] ?? 'Unknown';
             </div>
         </div>
     <?php endif; ?>
-    -->
+
 
 
 
@@ -1521,7 +2032,7 @@ $question_number = $_GET['question_number'] ?? 'Unknown';
 
                 // Show the System Assessment section by default
                 document.addEventListener('DOMContentLoaded', function () {
-                    showSection('system-assessment', document.getElementById('nav-system-assessment'));
+                    showSection('system-assessment', document.getElementById('nav-system-assessmen          t'));
                 });
             </script>
 
