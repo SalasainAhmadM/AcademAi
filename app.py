@@ -2472,3 +2472,42 @@ def determine_rubric_level(similarity_score, rubric_headers):
 
     # If score is above all thresholds, return the highest level
     return filtered_headers[-1]
+
+@app.route('/test-api', methods=['GET'])
+def test_api():
+    try:
+        print(f"Testing with API_KEY: {API_KEY[:10]}...{API_KEY[-5:]}")
+        
+        payload = {
+            "contents": [{
+                "parts": [{"text": "Say hello"}]
+            }]
+        }
+        
+        response = requests.post(
+            f"{URL}?key={API_KEY}",
+            headers={"Content-Type": "application/json"},
+            data=json.dumps(payload)
+        )
+        
+        print(f"Gemini API Response Status: {response.status_code}")
+        
+        if response.status_code == 200:
+            return jsonify({
+                "success": True,
+                "api_works": True,
+                "response": response.json()
+            })
+        else:
+            return jsonify({
+                "success": False,
+                "status_code": response.status_code,
+                "error": response.text
+            }), response.status_code
+            
+    except Exception as e:
+        return jsonify({
+            "success": False,
+            "error": str(e),
+            "traceback": traceback.format_exc()
+        }), 500
