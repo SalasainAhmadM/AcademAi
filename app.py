@@ -259,7 +259,8 @@ def determine_rubric_level(similarity_score, rubric_headers):
                 return header
         return rubric_headers[0] if rubric_headers else "Needs Improvement"
 
-API_KEY = "AIzaSyDlvq2Fin1tEG5AQqrqdGWiGy5aP0vAqSk"
+# API_KEY = "AIzaSyBKjaowFBdVGFM63tK1Aw3VqsEDK6a7o3s"
+API_KEY = os.getenv('GEMINI_API_KEY', 'AIzaSyBKjaowFBdVGFM63tK1Aw3VqsEDK6a7o3s')
 URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent"
 
 headers = {
