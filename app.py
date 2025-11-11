@@ -385,60 +385,68 @@ def standardize_response(raw_text):
 
 @app.route('/autogenerate', methods=['POST'])
 def autogenerate_essay():
-    data = request.json
-    if not data or 'essay' not in data or 'rubrics_criteria' not in data:
-        return jsonify({"error": "Missing required fields: essay and/or rubrics_criteria"}), 400
+    try:
+        print("="*50)
+        print("AUTOGENERATE ENDPOINT CALLED")
+        print("="*50)
+        
+        data = request.json
+        print(f"Received data: {data}")
+        
+        if not data or 'essay' not in data or 'rubrics_criteria' not in data:
+            error_msg = f"Missing required fields. Data: {data}"
+            print(f"ERROR: {error_msg}")
+            return jsonify({"error": "Missing required fields: essay and/or rubrics_criteria"}), 400
 
-    essay = data['essay']
-    rubrics_criteria = data['rubrics_criteria']
+        essay = data['essay']
+        rubrics_criteria = data['rubrics_criteria']
+        
+        print(f"Essay: {essay[:100]}...")  # Print first 100 chars
+        print(f"Rubrics criteria: {rubrics_criteria}")
 
+        is_auto_generate = rubrics_criteria == "auto-generate"
 
-    is_auto_generate = rubrics_criteria == "auto-generate"
+        row_count = 4
+        column_count = 4
 
+        if "row_count:" in essay:
+            row_match = re.search(r'row_count:\s*(\d+)', essay)
+            if row_match:
+                row_count = int(row_match.group(1))
+                row_count = max(2, min(8, row_count))
+                print(f"Row count: {row_count}")
 
-    row_count = 4
-    column_count = 4
+        if "column_count:" in essay:
+            col_match = re.search(r'column_count:\s*(\d+)', essay)
+            if col_match:
+                column_count = int(col_match.group(1))
+                column_count = max(2, min(5, column_count))
+                print(f"Column count: {column_count}")
 
+        headers_str = ", ".join([f'"Level {i+1} ({column_count+1-i})"' for i in range(column_count)])
+        rows_str = ""
 
-    if "row_count:" in essay:
-        row_match = re.search(r'row_count:\s*(\d+)', essay)
-        if row_match:
-            row_count = int(row_match.group(1))
-            row_count = max(2, min(8, row_count))
+        for i in range(row_count):
+            cells_str = ", ".join([f'"LEVEL {j+1} DESCRIPTION"' for j in range(column_count)])
+            weight = 100 // row_count
+            extra = 100 % row_count
 
-    if "column_count:" in essay:
-        col_match = re.search(r'column_count:\s*(\d+)', essay)
-        if col_match:
-            column_count = int(col_match.group(1))
-            column_count = max(2, min(5, column_count))
+            if i == 0:
+                weight += extra
 
-
-    headers_str = ", ".join([f'"Level {i+1} ({column_count+1-i})"' for i in range(column_count)])
-    rows_str = ""
-
-    for i in range(row_count):
-        cells_str = ", ".join([f'"LEVEL {j+1} DESCRIPTION"' for j in range(column_count)])
-        weight = 100 // row_count
-        extra = 100 % row_count
-
-        if i == 0:
-            weight += extra
-
-        rows_str += f"""
+            rows_str += f"""
     {{
         "criteria": "CRITERION NAME {i+1}",
         "cells": [{cells_str}, "{weight}"]
     }}{"," if i < row_count-1 else ""}"""
 
-
-    json_template = f"""{{
+        json_template = f"""{{
     "headers": [{headers_str}, "Weight %"],
     "rows": [{rows_str}
     ]
 }}"""
 
-
-    initiate_prompt = f"""Create a detailed academic rubric in JSON format with exactly {row_count} criteria rows and exactly {column_count} scoring levels plus a weight column.
+        initiate_prompt = f"""Create a detailed academic rubric in JSON format with exactly {row_count} criteria rows and exactly {column_count} scoring levels plus a weight column.
 The output must follow this exact JSON structure:
 {json_template}
 
@@ -449,30 +457,44 @@ IMPORTANT:
 4. Do not use markdown code blocks or any other formatting - just return the raw JSON.
 Based on this information: """
 
-    full_prompt = initiate_prompt + essay
+        full_prompt = initiate_prompt + essay
+        
+        print("Calling Gemini API...")
+        print(f"API_KEY exists: {bool(API_KEY)}")
+        print(f"API_KEY length: {len(API_KEY) if API_KEY else 0}")
 
-    payload = {
-        "contents": [
-            {
-                "parts": [
-                    {"text": full_prompt}
-                ]
+        payload = {
+            "contents": [
+                {
+                    "parts": [
+                        {"text": full_prompt}
+                    ]
+                }
+            ],
+            "generationConfig": {
+                "temperature": 0.0
             }
-        ],
-        "generationConfig": {
-            "temperature": 0.0
         }
-    }
 
-    try:
         response = requests.post(
             f"{URL}?key={API_KEY}",
             headers=headers,
-            data=json.dumps(payload)
+            data=json.dumps(payload),
+            timeout=60  # Add timeout
         )
+        
+        print(f"Gemini API Response Status: {response.status_code}")
+        
+        if response.status_code != 200:
+            error_detail = f"Gemini API Error {response.status_code}: {response.text}"
+            print(f"ERROR: {error_detail}")
+            return jsonify({"error": error_detail}), response.status_code
+        
         response_data = response.json()
         raw_text = response_data['candidates'][0]['content']['parts'][0]['text']
-
+        
+        print(f"Received response length: {len(raw_text)}")
+        print(f"Response preview: {raw_text[:200]}...")
 
         json_match = re.search(r'\{[\s\S]*"headers"[\s\S]*"rows"[\s\S]*\}', raw_text)
         if json_match:
@@ -480,18 +502,37 @@ Based on this information: """
             try:
                 json_data = json.loads(json_str)
                 if "headers" in json_data and "rows" in json_data:
+                    print("SUCCESS: Valid rubric JSON generated")
                     return jsonify({"evaluation": json_data})
                 else:
+                    print("ERROR: JSON missing required fields")
                     return jsonify({"evaluation": raw_text})
-            except json.JSONDecodeError:
+            except json.JSONDecodeError as e:
+                print(f"ERROR: JSON decode failed: {e}")
                 return jsonify({"evaluation": raw_text})
         else:
+            print("ERROR: No JSON found in response")
             return jsonify({"evaluation": raw_text})
 
+    except requests.exceptions.Timeout:
+        error_msg = "Request to Gemini API timed out"
+        print(f"ERROR: {error_msg}")
+        return jsonify({"error": error_msg}), 504
+        
+    except requests.exceptions.RequestException as e:
+        error_msg = f"Request error: {str(e)}"
+        print(f"ERROR: {error_msg}")
+        print(traceback.format_exc())
+        return jsonify({"error": error_msg}), 500
+        
     except Exception as e:
-        return jsonify({"error": str(e)}), 500
-
-
+        error_msg = f"Unexpected error: {str(e)}"
+        print("="*50)
+        print("EXCEPTION IN AUTOGENERATE:")
+        print(error_msg)
+        print(traceback.format_exc())
+        print("="*50)
+        return jsonify({"error": error_msg, "traceback": traceback.format_exc()}), 500
 
 @app.route('/evaluate', methods=['POST'])
 def evaluate_essay():
@@ -2472,42 +2513,3 @@ def determine_rubric_level(similarity_score, rubric_headers):
 
     # If score is above all thresholds, return the highest level
     return filtered_headers[-1]
-
-@app.route('/test-api', methods=['GET'])
-def test_api():
-    try:
-        print(f"Testing with API_KEY: {API_KEY[:10]}...{API_KEY[-5:]}")
-        
-        payload = {
-            "contents": [{
-                "parts": [{"text": "Say hello"}]
-            }]
-        }
-        
-        response = requests.post(
-            f"{URL}?key={API_KEY}",
-            headers={"Content-Type": "application/json"},
-            data=json.dumps(payload)
-        )
-        
-        print(f"Gemini API Response Status: {response.status_code}")
-        
-        if response.status_code == 200:
-            return jsonify({
-                "success": True,
-                "api_works": True,
-                "response": response.json()
-            })
-        else:
-            return jsonify({
-                "success": False,
-                "status_code": response.status_code,
-                "error": response.text
-            }), response.status_code
-            
-    except Exception as e:
-        return jsonify({
-            "success": False,
-            "error": str(e),
-            "traceback": traceback.format_exc()
-        }), 500
