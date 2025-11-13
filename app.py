@@ -16,13 +16,20 @@ from nltk.corpus import stopwords
 import nltk
 import os
 import shutil
-
+from dotenv import load_dotenv
 import numpy as np
 from difflib import SequenceMatcher
 import math
 from nltk.tokenize import sent_tokenize, word_tokenize
 from nltk.stem import PorterStemmer
 import traceback
+load_dotenv()
+API_KEY = os.getenv("GEMINI_API_KEY")
+URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent"
+headers = {
+    "Content-Type": "application/json"
+}
+
 nltk_path = os.path.join(os.getcwd(), "nltk_data")
 if os.path.exists(nltk_path):
     shutil.rmtree(nltk_path)  # Remove old data to avoid corruption
@@ -265,13 +272,6 @@ def determine_rubric_level(similarity_score, rubric_headers):
             if any(word in header.lower() for word in ['needs improvement', 'poor', 'inadequate', 'unsatisfactory']):
                 return header
         return rubric_headers[0] if rubric_headers else "Needs Improvement"
-
-from dotenv import load_dotenv
-import os
-
-load_dotenv()
-API_KEY = os.getenv("GEMINI_API_KEY")
-URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent"
 
 headers = {
     "Content-Type": "application/json"
