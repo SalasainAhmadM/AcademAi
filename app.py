@@ -29,7 +29,14 @@ if os.path.exists(nltk_path):
 os.makedirs(nltk_path, exist_ok=True)
 
 app = Flask(__name__)
-CORS(app, resources={r"/*": {"origins": ["https://academai.xscpry.site"]}})
+CORS(app, resources={r"/*": {
+    "origins": [
+        "https://academai.xscpry.site",
+        "https://www.academai.xscpry.site",
+    ],
+    "methods": ["GET", "POST", "OPTIONS"],
+    "allow_headers": ["Content-Type", "Authorization", "Accept"]
+}})
 # Set NLTK data path
 nltk.data.path.append(nltk_path)
 
@@ -392,7 +399,11 @@ def autogenerate_essay():
         print("="*50)
         print("AUTOGENERATE ENDPOINT CALLED")
         print("="*50)
-        
+        # CRITICAL: Check API key first
+        if not API_KEY:
+            error_msg = "GEMINI_API_KEY environment variable is not set!"
+            print(f"ERROR: {error_msg}")
+            return jsonify({"error": error_msg}), 500
         data = request.json
         print(f"Received data: {data}")
         

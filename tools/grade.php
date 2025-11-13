@@ -16,7 +16,7 @@ class EssayEvaluator
   /**
    * Detect AI-generated content in essay
    */
-  public function detectAIContent($essay, $apiUrl = 'https://kaizokuDev.pythonanywhere.com/analyze')
+  public function detectAIContent($essay, $apiUrl = 'https://academai-wtad.onrender.com/analyze')
   {
     // Validate input
     if (empty($essay) || str_word_count($essay) < 20) {
@@ -171,7 +171,7 @@ class EssayEvaluator
   /**
    * Compare student answer with reference answer using rubrics
    */
-  public function compareAnswer($studentAnswer, $referenceAnswer, $rubricData, $question, $apiUrl = 'https://kaizokuDev.pythonanywhere.com/compare')
+  public function compareAnswer($studentAnswer, $referenceAnswer, $rubricData, $question, $apiUrl = 'https://academai-wtad.onrender.com/compare')
   {
     // Validate inputs
     if (empty($studentAnswer)) {
@@ -636,7 +636,7 @@ strictly follow the format of example output:
   /**
    * Call evaluation API
    */
-  public function callEvaluationAPI($data, $url = 'https://kaizokuDev.pythonanywhere.com/evaluate')
+  public function callEvaluationAPI($data, $url = 'https://academai-wtad.onrender.com/evaluate')
   {
     $ch = curl_init($url);
     if (!$ch) {
@@ -680,7 +680,7 @@ strictly follow the format of example output:
   /**
    * Process all essays for evaluation
    */
-  public function callBenchmarkAPI($studentEssay, $referenceAnswer, $rubricCriteria, $question, $url = 'https://kaizokuDev.pythonanywhere.com/benchmark')
+  public function callBenchmarkAPI($studentEssay, $referenceAnswer, $rubricCriteria, $question, $url = 'https://academai-wtad.onrender.com/benchmark')
   {
     // Validate inputs
     if (empty($studentEssay) || empty($referenceAnswer)) {
