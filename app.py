@@ -44,6 +44,18 @@ CORS(app, resources={r"/*": {
     "methods": ["GET", "POST", "OPTIONS"],
     "allow_headers": ["Content-Type", "Authorization", "Accept"]
 }})
+
+import sys
+sys.stdout.write("="*60 + "\n")
+sys.stdout.write("🔑 API KEY STATUS CHECK\n")
+sys.stdout.write(f"API_KEY loaded: {bool(API_KEY)}\n")
+if API_KEY:
+    sys.stdout.write(f"API_KEY length: {len(API_KEY)}\n")
+    sys.stdout.write(f"API_KEY preview: {API_KEY[:15]}...\n")
+else:
+    sys.stdout.write("⚠️ WARNING: GEMINI_API_KEY not found!\n")
+sys.stdout.write("="*60 + "\n")
+sys.stdout.flush()
 # Set NLTK data path
 nltk.data.path.append(nltk_path)
 
